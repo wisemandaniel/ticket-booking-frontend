@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -6,178 +6,340 @@ import {
   TextInput, 
   TouchableOpacity, 
   ScrollView, 
-  Alert, 
-  Switch 
+  ActivityIndicator,
+  Animated,
+  Easing
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { mockUsers } from '../mockData';
+import { useAuth } from '@/contexts/AuthContext';
+import { profileService } from '@/services/api';
+
+interface Profile {
+  fullName: string;
+  email: string;
+  address?: string;
+  idCardNumber?: string;
+  phoneNumber?: string;
+}
 
 const ProfileScreen = () => {
-  const [profile, setProfile] = useState(mockUsers[0]);
+  const { t, language, toggleLanguage } = useLanguage();
+  const { user, updatedUser , signOut }: any = useAuth();
+  const [profile, setProfile] = useState<any>({
+    fullName: '',
+    email: '',
+    address: '',
+    idCardNumber: '',
+    phoneNumber: ''
+  });
   const [editing, setEditing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const { t, language, toggleLanguage } = useLanguage();
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Snackbar states
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarType, setSnackbarType] = useState<'success' | 'error'>('success');
+  const slideAnim = useRef(new Animated.Value(0)).current;
 
-  const handleUpdate = () => {
-    Alert.alert(t('success'), t('profileUpdated'));
-    setEditing(false);
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        setIsLoading(true);
+        const response = await profileService.getProfile();
+        setProfile(response.data);
+        updatedUser(response.data);
+      } catch (error) {
+        showSnackbar(t('profileLoadError'), 'error');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (!user?.email) {
+      fetchProfile();
+    } else {
+      setProfile(user);
+      setIsLoading(false);
+    }
+  }, []);
+
+  const showSnackbar = (message: string, type: 'success' | 'error') => {
+    setSnackbarMessage(message);
+    setSnackbarType(type);
+    setSnackbarVisible(true);
+    
+    Animated.timing(slideAnim, {
+      toValue: 1,
+      duration: 300,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: true,
+    }).start();
+
+    setTimeout(() => {
+      hideSnackbar();
+    }, 3000);
   };
 
-  return (
-    <ScrollView 
-      contentContainerStyle={styles.container}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Header with title and buttons */}
-      <View style={styles.header}>
-        <Text style={styles.title}>{t('title')}</Text>
-        <View style={styles.headerButtons}>
-          {!editing && (
-            <TouchableOpacity 
-              onPress={() => setEditing(true)} 
-              style={styles.editButton}
-            >
-              <MaterialIcons name="edit" size={24} color="#2E86C1" />
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity 
-            onPress={() => setShowSettings(!showSettings)} 
-            style={styles.settingsButton}
-          >
-            <MaterialIcons 
-              name={showSettings ? "close" : "settings"} 
-              size={24} 
-              color="#2C3E50" 
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
+  const hideSnackbar = () => {
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 300,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: true,
+    }).start(() => {
+      setSnackbarVisible(false);
+    });
+  };
 
-      {/* Settings Panel */}
-      {showSettings && (
-        <View style={styles.settingsContainer}>
-          <Text style={styles.settingsTitle}>{t('settings')}</Text>
-          
-          <View style={styles.settingItem}>
-            <Text style={styles.settingLabel}>{t('language')}</Text>
-            <View style={styles.languageToggle}>
-              <Text style={styles.languageText}>{t('english')}</Text>
-              <Switch
-                value={language === 'fr'}
-                onValueChange={toggleLanguage}
-                trackColor={{ false: "#767577", true: "#81b0ff" }}
-                thumbColor={language === 'fr' ? "#2E86C1" : "#f4f3f4"}
+  const handleUpdate = async () => {
+    try {
+      setIsUpdating(true);
+      const updatedProfile = await profileService.updateProfile(profile);
+      setProfile(updatedProfile.data.user);
+      await updatedUser(updatedProfile.data.user);
+      
+      showSnackbar(t('profileUpdated'), 'success');
+      setEditing(false);
+    } catch (error) {
+      showSnackbar(t('profileUpdateError'), 'error');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await signOut();
+    } catch (error) {
+      showSnackbar(t('logoutFailed'), 'error');
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2E86C1" />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.mainContainer}>
+      <ScrollView 
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header with title and buttons */}
+        <View style={styles.header}>
+          <Text style={styles.title}>{profile.fullName || t('profile')}</Text>
+          <View style={styles.headerButtons}>
+            {!editing && (
+              <TouchableOpacity 
+                onPress={() => setEditing(true)} 
+                style={styles.editButton}
+              >
+                <MaterialIcons name="edit" size={24} color="#2E86C1" />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity 
+              onPress={() => setShowSettings(!showSettings)} 
+              style={styles.settingsButton}
+            >
+              <MaterialIcons 
+                name={showSettings ? "close" : "settings"} 
+                size={24} 
+                color="#2C3E50" 
               />
-              <Text style={styles.languageText}>{t('french')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <View style={styles.settingsContainer}>
+            <Text style={styles.settingsTitle}>{t('settings')}</Text>
+            
+            <View style={styles.settingItem}>
+              <Text style={styles.settingLabel}>{t('language')}</Text>
+              <View style={styles.languageToggle}>
+                <Text style={styles.languageText}>{t('english')}</Text>
+                <Switch
+                  value={language === 'fr'}
+                  onValueChange={toggleLanguage}
+                  trackColor={{ false: "#767577", true: "#81b0ff" }}
+                  thumbColor={language === 'fr' ? "#2E86C1" : "#f4f3f4"}
+                />
+                <Text style={styles.languageText}>{t('french')}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              disabled={isLoggingOut}
+            >
+              {isLoggingOut ? (
+                <ActivityIndicator color="#E74C3C" />
+              ) : (
+                <>
+                  <MaterialIcons name="logout" size={20} color="#E74C3C" />
+                  <Text style={styles.logoutButtonText}>{t('logout')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Edit Mode */}
+        {editing ? (
+          <View style={styles.formContainer}>
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>{t('fullName')}</Text>
+              <TextInput
+                style={styles.input}
+                value={profile.fullName}
+                onChangeText={(text) => setProfile({...profile, fullName: text})}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>{t('email')}</Text>
+              <TextInput
+                style={styles.input}
+                value={profile.email}
+                editable={false}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>{t('currentAddress')}</Text>
+              <TextInput
+                style={styles.input}
+                value={profile.address || ''}
+                onChangeText={(text) => setProfile({...profile, address: text})}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>{t('phoneNumber')}</Text>
+              <TextInput
+                style={styles.input}
+                value={profile.phoneNumber || ''}
+                onChangeText={(text) => setProfile({...profile, phoneNumber: text})}
+                keyboardType="phone-pad"
+              />
+            </View>
+
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity
+                style={[styles.button, styles.cancelButton]}
+                onPress={() => setEditing(false)}
+              >
+                <Text style={[styles.buttonText, { color: '#2C3E50' }]}>{t('cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.button, styles.saveButton]}
+                onPress={handleUpdate}
+                disabled={isUpdating}
+              >
+                {isUpdating ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text style={styles.buttonText}>{t('saveChanges')}</Text>
+                )}
+              </TouchableOpacity>
             </View>
           </View>
-        </View>
+        ) : (
+          /* View Mode */
+          <View style={styles.profileContainer}>
+            <View style={styles.profileInfo}>
+              <Text style={styles.label}>{t('fullName')}</Text>
+              <Text style={styles.value}>{profile.fullName}</Text>
+            </View>
+
+            <View style={styles.profileInfo}>
+              <Text style={styles.label}>{t('email')}</Text>
+              <Text style={styles.value}>{profile.email}</Text>
+            </View>
+
+            {profile.address && (
+              <View style={styles.profileInfo}>
+                <Text style={styles.label}>{t('currentAddress')}</Text>
+                <Text style={styles.value}>{profile.address}</Text>
+              </View>
+            )}
+
+            {profile.phoneNumber && (
+              <View style={styles.profileInfo}>
+                <Text style={styles.label}>{t('phoneNumber')}</Text>
+                <Text style={styles.value}>{profile.phoneNumber}</Text>
+              </View>
+            )}
+
+            {profile.idCardNumber && (
+              <View style={styles.profileInfo}>
+                <Text style={styles.label}>{t('idCardNumber')}</Text>
+                <Text style={styles.value}>{profile.idCardNumber}</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Custom Snackbar */}
+      {snackbarVisible && (
+        <Animated.View 
+          style={[
+            styles.snackbar,
+            snackbarType === 'success' ? styles.successSnackbar : styles.errorSnackbar,
+            {
+              transform: [{
+                translateY: slideAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [100, 0]
+                })
+              }]
+            }
+          ]}
+        >
+          <MaterialIcons 
+            name={snackbarType === 'success' ? 'check-circle' : 'error'} 
+            size={24} 
+            color="white" 
+          />
+          <Text style={styles.snackbarText}>{snackbarMessage}</Text>
+          <TouchableOpacity onPress={hideSnackbar}>
+            <MaterialIcons name="close" size={20} color="white" />
+          </TouchableOpacity>
+        </Animated.View>
       )}
-
-      {/* Edit Mode */}
-      {editing ? (
-        <View style={styles.formContainer}>
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>{t('fullName')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder={t('fullName')}
-              value={profile.fullName}
-              onChangeText={(text) => setProfile({ ...profile, fullName: text })}
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>{t('currentAddress')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder={t('currentAddress')}
-              value={profile.currentAddress}
-              onChangeText={(text) =>
-                setProfile({ ...profile, currentAddress: text })
-              }
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>{t('idCardNumber')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder={t('idCardNumber')}
-              value={profile.idCardNumber}
-              onChangeText={(text) =>
-                setProfile({ ...profile, idCardNumber: text })
-              }
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>{t('phoneNumber')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder={t('phoneNumber')}
-              value={profile.phoneNumber}
-              onChangeText={(text) =>
-                setProfile({ ...profile, phoneNumber: text })
-              }
-              keyboardType="phone-pad"
-            />
-          </View>
-
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              style={[styles.button, styles.cancelButton]}
-              onPress={() => setEditing(false)}
-            >
-              <Text style={styles.buttonText}>{t('cancel')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.button, styles.saveButton]}
-              onPress={handleUpdate}
-            >
-              <Text style={styles.buttonText}>{t('saveChanges')}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : (
-        /* View Mode */
-        <View style={styles.profileContainer}>
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>{t('fullName')}</Text>
-            <Text style={styles.value}>{profile.fullName}</Text>
-          </View>
-
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>{t('email')}</Text>
-            <Text style={styles.value}>{profile.email}</Text>
-          </View>
-
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>{t('currentAddress')}</Text>
-            <Text style={styles.value}>{profile.currentAddress}</Text>
-          </View>
-
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>{t('idCardNumber')}</Text>
-            <Text style={styles.value}>{profile.idCardNumber}</Text>
-          </View>
-
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>{t('phoneNumber')}</Text>
-            <Text style={styles.value}>{profile.phoneNumber}</Text>
-          </View>
-        </View>
-      )}
-    </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    position: 'relative',
+  },
   container: {
     flexGrow: 1,
     padding: 20,
     backgroundColor: '#f8f9fa',
+    paddingBottom: 80, // Extra padding for snackbar
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',
@@ -245,7 +407,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 3,
-    marginBottom: 100
+    marginBottom: 20
   },
   profileContainer: {
     backgroundColor: '#fff',
@@ -256,7 +418,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 3,
-    marginBottom: 100
+    marginBottom: 20
   },
   inputContainer: {
     marginBottom: 20,
@@ -316,6 +478,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#FDEDED',
+    marginTop: 10,
+  },
+  logoutButtonText: {
+    color: '#E74C3C',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  snackbar: {
+    position: 'absolute',
+    top: 10,
+    left: 20,
+    right: 20,
+    padding: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 100
+  },
+  successSnackbar: {
+    backgroundColor: '#4CAF50',
+    zIndex: 1000
+  },
+  errorSnackbar: {
+    backgroundColor: '#F44336',
+    zIndex: 1000
+  },
+  snackbarText: {
+    color: 'white',
+    marginLeft: 10,
+    marginRight: 10,
+    flex: 1,
+    fontSize: 16,
   },
 });
 

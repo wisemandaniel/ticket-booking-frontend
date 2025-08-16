@@ -1,11 +1,21 @@
-import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Animated } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
+
+const baseUrl = 'http://192.168.1.45:3000';
 
 export default function AuthScreen() {
   const { t, language, toggleLanguage } = useLanguage();
+  const { 
+    isAuthenticated, 
+    setIsAuthenticated,
+    signIn, 
+    register,
+    isLoading: authLoading 
+  } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,6 +23,64 @@ export default function AuthScreen() {
   const [errors, setErrors] = useState({ email: '', password: '', name: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  
+  const [showError, setShowError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const fadeAnim = useState(new Animated.Value(0))[0];
+
+  // Show success snackbar
+  const showSuccessMessage = (message: string) => {
+    setSuccessMessage(message);
+    setShowSuccess(true);
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+
+    setTimeout(() => {
+      hideSuccessMessage();
+    }, 3000);
+  };
+
+  // Hide success snackbar
+  const hideSuccessMessage = () => {
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowSuccess(false);
+    });
+  };
+
+  // Show error snackbar
+  const showErrorMessage = (message: string) => {
+    setErrorMessage(message);
+    setShowError(true);
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+
+    setTimeout(() => {
+      hideErrorMessage();
+    }, 3000);
+  };
+
+  // Hide error snackbar
+  const hideErrorMessage = () => {
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowError(false);
+    });
+  };
 
   const validateForm = () => {
     const newErrors = { email: '', password: '', name: '' };
@@ -39,13 +107,39 @@ export default function AuthScreen() {
 
   const handleAuth = async () => {
     if (!validateForm()) return;
+    
     setIsLoading(true);
+    setShowError(false); // Clear previous error
+
     try {
-      // Simulate authentication
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      router.push('/(tabs)');
-    } catch (error) {
-      console.error('Authentication error:', error);
+      if (isLogin) {
+        await signIn({
+          email: email.trim(),
+          password: password.trim()
+        });
+      } else {
+        await register({
+          fullName: name.trim(),
+          email: email.trim(),
+          password: password.trim()
+        });
+        
+        // Show success message
+        showSuccessMessage(t('accountCreated'));
+        
+        // Switch to login screen and auto-fill after a delay
+        setTimeout(() => {
+          setIsLogin(true);
+          setName(''); // Clear name field
+        }, 500);
+      }
+    } catch (error: any) {
+      // Extract the error message properly
+      const message = error.response?.data?.message || 
+                     error.message || 
+                     error.toString() || 
+                     t('authFailed');
+      showErrorMessage(message);
     } finally {
       setIsLoading(false);
     }
@@ -121,11 +215,11 @@ export default function AuthScreen() {
       </View>
       
       <TouchableOpacity 
-        style={[styles.button, isLoading && styles.buttonDisabled]} 
+        style={[styles.button, (isLoading || authLoading) && styles.buttonDisabled]} 
         onPress={handleAuth}
-        disabled={isLoading}
+        disabled={isLoading || authLoading}
       >
-        {isLoading ? (
+        {(isLoading || authLoading) ? (
           <ActivityIndicator color="white" />
         ) : (
           <Text style={styles.buttonText}>{isLogin ? t('login') : t('signUp')}</Text>
@@ -154,13 +248,40 @@ export default function AuthScreen() {
       </View>
       
       <TouchableOpacity 
-        onPress={() => setIsLogin(!isLogin)} 
+        onPress={() => {
+          setIsLogin(!isLogin);
+          if (isLogin) {
+            setName(''); // Clear name when switching to signup
+          }
+        }} 
         style={styles.switchContainer}
       >
         <Text style={styles.switchText}>
           {isLogin ? t('needAccount') : t('haveAccount')}
         </Text>
       </TouchableOpacity>
+
+      {/* Error Snackbar */}
+      {showError && (
+        <Animated.View style={[styles.snackbar, styles.errorSnackbar, { opacity: fadeAnim }]}>
+          <Ionicons name="warning" size={24} color="white" />
+          <Text style={styles.snackbarText}>{errorMessage}</Text>
+          <TouchableOpacity onPress={hideErrorMessage}>
+            <Ionicons name="close" size={24} color="white" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
+      {/* Success Snackbar */}
+      {showSuccess && (
+        <Animated.View style={[styles.snackbar, styles.successSnackbar, { opacity: fadeAnim }]}>
+          <Ionicons name="checkmark-circle" size={24} color="white" />
+          <Text style={styles.snackbarText}>{successMessage}</Text>
+          <TouchableOpacity onPress={hideSuccessMessage}>
+            <Ionicons name="close" size={24} color="white" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -273,6 +394,37 @@ const styles = StyleSheet.create({
   switchText: {
     color: '#4CAF50',
     textAlign: 'center',
+    fontSize: 16,
+  },
+  snackbar: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    padding: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  successSnackbar: {
+    backgroundColor: '#4CAF50',
+  },
+  errorSnackbar: {
+    backgroundColor: '#F44336',
+  },
+  snackbarText: {
+    color: 'white',
+    marginLeft: 10,
+    marginRight: 10,
+    flex: 1,
     fontSize: 16,
   },
 });
