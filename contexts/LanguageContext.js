@@ -11,7 +11,7 @@ const translations = {
     idCardNumber: 'ID Card Number',
     phoneNumber: 'Phone Number',
     editProfile: 'Edit Profile',
-    saveChanges: 'Save Changes',
+    saveChanges: 'Update',
     cancel: 'Cancel',
     settings: 'Settings',
     language: 'Language',

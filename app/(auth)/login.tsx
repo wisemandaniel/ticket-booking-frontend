@@ -3,9 +3,17 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
+const baseUrl = 'http://192.168.1.45:3000'
 
 export default function AuthScreen() {
   const { t, language, toggleLanguage } = useLanguage();
+  const { 
+    isAuthenticated, 
+    setIsAuthenticated,
+    signIn, 
+    isLoading: authLoading 
+  } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -37,19 +45,19 @@ export default function AuthScreen() {
     return isValid;
   };
 
-  const handleAuth = async () => {
-    if (!validateForm()) return;
-    setIsLoading(true);
-    try {
-      // Simulate authentication
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      router.push('/(tabs)');
-    } catch (error) {
-      console.error('Authentication error:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+ const handleAuth = async () => {
+  if (!validateForm()) return;
+  
+  try {
+    await signIn({
+      email: email.trim(),
+      password: password.trim()
+    });
+  } catch (error) {
+    console.error('Login failed:', error);
+    // Error is already handled by AuthContext
+  }
+};
 
   return (
     <KeyboardAvoidingView 

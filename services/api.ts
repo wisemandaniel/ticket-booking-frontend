@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-const BASE_URL = 'https://sum-up-backend.onrender.com/api/v1';
+const BASE_URL = 'http://192.168.1.45:3000/api/v1';
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -48,6 +48,21 @@ export const authService = {
   resetPassword: (data: any) => api.put('/auth/reset-password', data),
   getCurrentUser: () => api.get('/auth/me'),
   logout: () => api.get('/auth/logout'),
+};
+
+export const profileService = {
+  getProfile: () => api.get('/profile/me'),
+  updateProfile: async (data: any): Promise<any> => {
+    try {
+      console.log('Sending update:', data); // Debug log
+      const response = await api.patch('/profile/update', data);
+      console.log('Update response:', response.data); // Debug log
+      return response.data;
+    } catch (error) {
+      console.error('Update error:', error);
+      throw error;
+    }
+  },
 };
 
 export const saveAuthToken = async (token: any) => {

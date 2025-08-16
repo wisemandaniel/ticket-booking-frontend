@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -7,22 +7,115 @@ import {
   TouchableOpacity, 
   ScrollView, 
   Alert, 
-  Switch 
+  Switch,
+  ActivityIndicator
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { mockUsers } from '../mockData';
+import { useAuth } from '@/contexts/AuthContext';
+import { profileService } from '@/services/api';
+
+interface Profile {
+  fullName: string;
+  email: string;
+  address?: string;
+  idCardNumber?: string;
+  phoneNumber?: string;
+}
 
 const ProfileScreen = () => {
-  const [profile, setProfile] = useState(mockUsers[0]);
+  const { t, language, toggleLanguage } = useLanguage();
+  const { user, updatedUser , signOut }: any = useAuth();
+  const [profile, setProfile] = useState<any>({
+    fullName: '',
+    email: '',
+    address: '',
+    idCardNumber: '',
+    phoneNumber: ''
+  });
   const [editing, setEditing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const { t, language, toggleLanguage } = useLanguage();
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  const handleUpdate = () => {
-    Alert.alert(t('success'), t('profileUpdated'));
-    setEditing(false);
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        setIsLoading(true);
+        const response = await profileService.getProfile();
+        setProfile(response.data);
+        updatedUser(response.data);
+      } catch (error) {
+        Alert.alert(t('error'), t('profileLoadError'));
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // If we don't have complete user data from auth context, fetch it
+    if (!user?.email) {
+      fetchProfile();
+      console.log('email:');
+      
+    } else {
+      setProfile(user);
+      console.log('profile:');
+      setIsLoading(false);
+    }
+  }, []);
+
+  const handleUpdate = async () => {
+    try {
+      setIsUpdating(true);
+      const updatedProfile = await profileService.updateProfile(profile);
+      setProfile(updatedProfile.data.user);
+      await updatedUser(updatedProfile.data.user);
+      
+      Alert.alert(t('success'), t('profileUpdated'));
+      setEditing(false);
+    } catch (error) {
+      Alert.alert(t('error'), t('profileUpdateError'));
+      console.log('error:', error);
+      
+    } finally {
+      setIsUpdating(false);
+    }
   };
+
+  const handleLogout = async () => {
+    Alert.alert(
+      t('confirmLogout'),
+      t('logoutConfirmation'),
+      [
+        {
+          text: t('cancel'),
+          style: 'cancel',
+        },
+        {
+          text: t('logout'),
+          onPress: async () => {
+            setIsLoggingOut(true);
+            try {
+              await signOut();
+            } catch (error) {
+              Alert.alert(t('error'), t('logoutFailed'));
+            } finally {
+              setIsLoggingOut(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2E86C1" />
+      </View>
+    );
+  }
 
   return (
     <ScrollView 
@@ -31,7 +124,7 @@ const ProfileScreen = () => {
     >
       {/* Header with title and buttons */}
       <View style={styles.header}>
-        <Text style={styles.title}>{t('title')}</Text>
+        <Text style={styles.title}>{profile.fullName || t('profile')}</Text>
         <View style={styles.headerButtons}>
           {!editing && (
             <TouchableOpacity 
@@ -72,6 +165,21 @@ const ProfileScreen = () => {
               <Text style={styles.languageText}>{t('french')}</Text>
             </View>
           </View>
+
+          <TouchableOpacity 
+            style={styles.logoutButton}
+            onPress={handleLogout}
+            disabled={isLoggingOut}
+          >
+            {isLoggingOut ? (
+              <ActivityIndicator color="#E74C3C" />
+            ) : (
+              <>
+                <MaterialIcons name="logout" size={20} color="#E74C3C" />
+                <Text style={styles.logoutButtonText}>{t('logout')}</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
       )}
 
@@ -82,9 +190,17 @@ const ProfileScreen = () => {
             <Text style={styles.inputLabel}>{t('fullName')}</Text>
             <TextInput
               style={styles.input}
-              placeholder={t('fullName')}
               value={profile.fullName}
-              onChangeText={(text) => setProfile({ ...profile, fullName: text })}
+              onChangeText={(text) => setProfile({...profile, fullName: text})}
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>{t('email')}</Text>
+            <TextInput
+              style={styles.input}
+              value={profile.email}
+              editable={false}
             />
           </View>
 
@@ -92,23 +208,8 @@ const ProfileScreen = () => {
             <Text style={styles.inputLabel}>{t('currentAddress')}</Text>
             <TextInput
               style={styles.input}
-              placeholder={t('currentAddress')}
-              value={profile.currentAddress}
-              onChangeText={(text) =>
-                setProfile({ ...profile, currentAddress: text })
-              }
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>{t('idCardNumber')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder={t('idCardNumber')}
-              value={profile.idCardNumber}
-              onChangeText={(text) =>
-                setProfile({ ...profile, idCardNumber: text })
-              }
+              value={profile.address || ''}
+              onChangeText={(text) => setProfile({...profile, address: text})}
             />
           </View>
 
@@ -116,11 +217,8 @@ const ProfileScreen = () => {
             <Text style={styles.inputLabel}>{t('phoneNumber')}</Text>
             <TextInput
               style={styles.input}
-              placeholder={t('phoneNumber')}
-              value={profile.phoneNumber}
-              onChangeText={(text) =>
-                setProfile({ ...profile, phoneNumber: text })
-              }
+              value={profile.phoneNumber || ''}
+              onChangeText={(text) => setProfile({...profile, phoneNumber: text})}
               keyboardType="phone-pad"
             />
           </View>
@@ -135,8 +233,13 @@ const ProfileScreen = () => {
             <TouchableOpacity
               style={[styles.button, styles.saveButton]}
               onPress={handleUpdate}
+              disabled={isUpdating}
             >
-              <Text style={styles.buttonText}>{t('saveChanges')}</Text>
+              {isUpdating ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.buttonText}>{t('saveChanges')}</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -153,20 +256,26 @@ const ProfileScreen = () => {
             <Text style={styles.value}>{profile.email}</Text>
           </View>
 
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>{t('currentAddress')}</Text>
-            <Text style={styles.value}>{profile.currentAddress}</Text>
-          </View>
+          {profile.address && (
+            <View style={styles.profileInfo}>
+              <Text style={styles.label}>{t('currentAddress')}</Text>
+              <Text style={styles.value}>{profile.address}</Text>
+            </View>
+          )}
 
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>{t('idCardNumber')}</Text>
-            <Text style={styles.value}>{profile.idCardNumber}</Text>
-          </View>
+          {profile.phoneNumber && (
+            <View style={styles.profileInfo}>
+              <Text style={styles.label}>{t('phoneNumber')}</Text>
+              <Text style={styles.value}>{profile.phoneNumber}</Text>
+            </View>
+          )}
 
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>{t('phoneNumber')}</Text>
-            <Text style={styles.value}>{profile.phoneNumber}</Text>
-          </View>
+          {profile.idCardNumber && (
+            <View style={styles.profileInfo}>
+              <Text style={styles.label}>{t('idCardNumber')}</Text>
+              <Text style={styles.value}>{profile.idCardNumber}</Text>
+            </View>
+          )}
         </View>
       )}
     </ScrollView>
@@ -178,6 +287,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     backgroundColor: '#f8f9fa',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',
@@ -245,7 +359,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 3,
-    marginBottom: 100
+    marginBottom: 20
   },
   profileContainer: {
     backgroundColor: '#fff',
@@ -256,7 +370,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 3,
-    marginBottom: 100
+    marginBottom: 20
   },
   inputContainer: {
     marginBottom: 20,
@@ -316,6 +430,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#FDEDED',
+    marginTop: 10,
+  },
+  logoutButtonText: {
+    color: '#E74C3C',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
 

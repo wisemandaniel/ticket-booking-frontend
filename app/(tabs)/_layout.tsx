@@ -20,9 +20,9 @@ const TabLayout = () => {
         );
     }
 
-    // if (!isAuthenticated) {
-    //     return <Redirect href="/(auth)/login" />;
-    // }
+    if (!isAuthenticated) {
+        return <Redirect href="/(auth)/login" />;
+    }
 
     return (
         <Tabs tabBar={props => <TabBar {...props} />}>
