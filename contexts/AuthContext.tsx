@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { authService } from '../services/api';
 
-const baseUrl = 'http://10.66.117.181:3000'
+const baseUrl = 'http://192.168.1.45:3000'
 
 // Types
 interface User {
@@ -35,7 +35,9 @@ interface LoginCredentials {
 }
 
 interface RegisterData {
-  whatsappNumber: string;
+  fullName: string;
+  email: string;
+  password: string;
   [key: string]: any;
 }
 
@@ -191,9 +193,9 @@ const signIn = async (credentials: { email: string; password: string }) => {
 
     const result = await response.json();
 
-    console.log('user: ', result.data.user);
+    console.log('user: ', result);
     
-    console.log('token: ', result.token);
+    console.log('token: ', result);
 
     if (!response.ok) {
       throw new Error(result.message || 'Login failed');
@@ -240,21 +242,28 @@ const signIn = async (credentials: { email: string; password: string }) => {
     }
   };
 
-  const register = async (userData: RegisterData) => {
+  const register = async (credentials: { fullName: string; email: string; password: string }) => {
     setIsLoading(true);
-    resetError();
-    
     try {
-      const response = await authService.register(userData);
-      
-      if (!response.data?.success) {
-        throw new Error(response.data?.message || 'Registration failed');
+      const response = await fetch(`${baseUrl}/api/v1/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(credentials),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Signup failed');
       }
 
-      handleNavigation('/verify-otp', { whatsappNumber: userData.whatsappNumber });
-      
-    } catch (err: any) {
-      handleAuthError(err, 'Registration failed');
+      // Store token securely
+      await SecureStore.setItemAsync('authToken', data.token);
+      setIsAuthenticated(true);
+    } catch (error) {
+      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -370,7 +379,9 @@ const signIn = async (credentials: { email: string; password: string }) => {
     resetError,
     forgotPassword,
     resetPassword,
-    updatedUser
+    updatedUser,
+    saveAuthData,
+    setIsAuthenticated,
   };
 
   return (
