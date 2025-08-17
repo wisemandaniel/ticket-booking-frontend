@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-const BASE_URL = 'http://192.168.1.45:3000/api/v1';
+const BASE_URL = 'http://10.223.102.181:3000/api/v1';
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -54,15 +54,54 @@ export const profileService = {
   getProfile: () => api.get('/profile/me'),
   updateProfile: async (data: any): Promise<any> => {
     try {
-      console.log('Sending update:', data); // Debug log
+      console.log('Sending update:', data);
       const response = await api.patch('/profile/update', data);
-      console.log('Update response:', response.data); // Debug log
+      console.log('Update response:', response.data);
       return response.data;
     } catch (error) {
       console.error('Update error:', error);
       throw error;
     }
   },
+};
+
+export const agencyService = {
+  // Get all agencies
+  getAllAgencies: () => api.get('/agencies'),
+  
+  // Get a single agency by ID
+  getAgencyById: (id: string) => api.get(`/agencies/${id}`),
+  
+  // Create a new agency (admin only)
+  createAgency: (data: {
+    name: string;
+    locations: string[];
+    destinations: string[];
+    contactInfo: {
+      phone: string;
+      email?: string;
+      address?: string;
+    };
+  }) => api.post('/agencies', data),
+  
+  // Update an agency (admin or agency owner)
+  updateAgency: (id: string, data: any) => api.patch(`/agencies/${id}`, data),
+  
+  // Delete an agency (admin only)
+  deleteAgency: (id: string) => api.delete(`/agencies/${id}`),
+  
+  // Get buses for a specific agency
+  getAgencyBuses: (agencyId: string) => api.get(`/agencies/${agencyId}/buses`),
+  
+  // Search agencies by location or destination
+  searchAgencies: (params: {
+    location?: string;
+    destination?: string;
+    name?: string;
+  }) => api.get('/agencies/search', { params }),
+  
+  // Get popular agencies (sorted by number of buses or bookings)
+  getPopularAgencies: (limit: number = 5) => api.get('/agencies/popular', { params: { limit } }),
 };
 
 export const saveAuthToken = async (token: any) => {
