@@ -32,8 +32,10 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos to update your profile picture",
-        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to use the camera to take profile pictures"
-      }
+        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to use the camera to take profile pictures",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.ndzodan.bus"
     },
     "android": {
       "adaptiveIcon": {
@@ -44,7 +46,8 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
