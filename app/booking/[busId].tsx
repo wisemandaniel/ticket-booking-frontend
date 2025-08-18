@@ -1,9 +1,21 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal, Pressable, TextInput, Image } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  ScrollView, 
+  Modal, 
+  Pressable, 
+  TextInput,
+  Dimensions,
+  Animated
+} from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
 import { mockAgencies } from '../mockData';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { MaterialIcons } from '@expo/vector-icons';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Seat {
   seatNumber: string;
@@ -23,13 +35,76 @@ interface BusType {
 interface PassengerInfo {
   name: string;
   idNumber: string;
-  idPhoto?: string;
 }
+
+interface SnackbarProps {
+  visible: boolean;
+  message: string;
+  type: 'success' | 'error' | 'info';
+  onDismiss: () => void;
+}
+
+const Snackbar: React.FC<SnackbarProps> = ({ visible, message, type, onDismiss }) => {
+  const [animation] = useState(new Animated.Value(0));
+
+  useEffect(() => {
+    if (visible) {
+      Animated.timing(animation, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+
+      const timer = setTimeout(() => {
+        onDismiss();
+      }, 3000);
+
+      return () => clearTimeout(timer);
+    } else {
+      Animated.timing(animation, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible]);
+
+  if (!visible) return null;
+
+  const backgroundColor = type === 'success' ? '#2ecc71' : 
+                         type === 'error' ? '#e74c3c' : '#3498db';
+
+  return (
+    <Animated.View 
+      style={[
+        styles.snackbar,
+        { 
+          backgroundColor,
+          opacity: animation,
+          transform: [
+            {
+              translateY: animation.interpolate({
+                inputRange: [0, 1],
+                outputRange: [50, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Text style={styles.snackbarText}>{message}</Text>
+      <TouchableOpacity onPress={onDismiss}>
+        <MaterialIcons name="close" size={20} color="white" />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
 
 export default function BookingScreen() {
   const { t } = useLanguage();
   const params = useLocalSearchParams();
-  const { agencyName, location, destination } = params;
+  const { agencyName, location, destination, busId } = params;
+  const { user } = useAuth();
   
   const [selectedBusType, setSelectedBusType] = useState<string>('30');
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
@@ -38,9 +113,15 @@ export default function BookingScreen() {
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [passengersInfo, setPassengersInfo] = useState<Record<string, PassengerInfo>>({});
-  const [activeSeatForPhoto, setActiveSeatForPhoto] = useState<string | null>(null);
-  const [momoNumber, setMomoNumber] = useState('');
+  const [momoNumber, setMomoNumber] = useState(user?.whatsappNumber || user?.phoneNumber || '');
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'momo'>('cash');
+  const [snackbar, setSnackbar] = useState({
+    visible: false,
+    message: '',
+    type: 'success' as 'success' | 'error' | 'info',
+  });
   
   const agency = mockAgencies.find(a => a.name === agencyName) || mockAgencies[0];
   
@@ -56,18 +137,30 @@ export default function BookingScreen() {
     const newPassengersInfo: Record<string, PassengerInfo> = {};
     selectedSeats.forEach(seat => {
       if (!passengersInfo[seat]) {
-        newPassengersInfo[seat] = { name: '', idNumber: '' };
+        newPassengersInfo[seat] = { 
+          name: user?.fullName || user?.legalBusinessName || '', 
+          idNumber: user?.idCardNumber || '',
+        };
       } else {
         newPassengersInfo[seat] = passengersInfo[seat];
       }
     });
     setPassengersInfo(newPassengersInfo);
-  }, [selectedSeats]);
+  }, [selectedSeats, user]);
+
+  const showSnackbar = (message: string, type: 'success' | 'error' | 'info') => {
+    setSnackbar({ visible: true, message, type });
+  };
+
+  const hideSnackbar = () => {
+    setSnackbar({ ...snackbar, visible: false });
+  };
 
   const generateSeatLayout = (totalSeats: number): Seat[] => {
     const seats: Seat[] = [];
     let seatNumber = 1;
     
+    // Driver seat
     seats.push({
       seatNumber: 'DRIVER',
       row: 1,
@@ -76,6 +169,7 @@ export default function BookingScreen() {
       isAvailable: false
     });
     
+    // First row seats
     seats.push({
       seatNumber: seatNumber.toString(),
       row: 1,
@@ -100,6 +194,7 @@ export default function BookingScreen() {
     
     let currentRow = 2;
     for (let r = 0; r < fullRows; r++) {
+      // Left side seats (3 per row)
       for (let i = 0; i < 3 && seatNumber <= totalSeats; i++) {
         seats.push({
           seatNumber: seatNumber.toString(),
@@ -111,6 +206,7 @@ export default function BookingScreen() {
         seatNumber++;
       }
       
+      // Right side seats (2 per row)
       for (let i = 0; i < 2 && seatNumber <= totalSeats; i++) {
         seats.push({
           seatNumber: seatNumber.toString(),
@@ -125,6 +221,7 @@ export default function BookingScreen() {
       currentRow++;
     }
     
+    // Last row seats if any remaining
     if (lastRowSeats > 0) {
       for (let i = 0; i < lastRowSeats && seatNumber <= totalSeats; i++) {
         seats.push({
@@ -158,7 +255,7 @@ export default function BookingScreen() {
         return prev.filter(s => s !== seatNumber);
       } else {
         if (prev.length >= 5) {
-          Alert.alert(t('maximumSeats'), t('maxSeatsMessage'));
+          showSnackbar(t('maxSeatsMessage'), 'error');
           return prev;
         }
         return [...prev, seatNumber];
@@ -172,7 +269,7 @@ export default function BookingScreen() {
 
   const handleBookSeats = () => {
     if (selectedSeats.length === 0) {
-      Alert.alert(t('noSeatsSelected'), t('selectSeatsMessage'));
+      showSnackbar(t('selectSeatsMessage'), 'error');
       return;
     }
     setConfirmModalVisible(true);
@@ -188,231 +285,242 @@ export default function BookingScreen() {
     }));
   };
 
-  const pickImage = async (seatNumber: string) => {
-    setActiveSeatForPhoto(seatNumber);
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      handlePassengerInfoChange(seatNumber, 'idPhoto', result.assets[0].uri);
-    }
-    setActiveSeatForPhoto(null);
-  };
-
-  const confirmBooking = () => {
+  const confirmBooking = async () => {
     for (const seat of selectedSeats) {
       if (!passengersInfo[seat]?.name || !passengersInfo[seat]?.idNumber) {
-        Alert.alert(t('missingInfo'), `${t('fillAllInfo')} ${seat}`);
+        showSnackbar(`${t('fillAllInfo')} ${seat}`, 'error');
         return;
       }
     }
     
-    setConfirmModalVisible(false);
-    Alert.alert(
-    t('bookingConfirmed'),
-    t('bookingConfirmationMessage', {
-        count: selectedSeats.length,
-        agency: agencyName,
-        total: calculateTotal().toLocaleString()
-    }),
-    [{ text: 'OK', onPress: () => router.back() }]
-    );
-  };
+    try {
+      setIsProcessingPayment(true);
+      
+      // Simulate API call to save booking
+      const bookingData = {
+        agencyId: agency.name,
+        kickoff_location: location,
+        destination: destination,
+        busType: selectedBusType,
+        seats: selectedSeats,
+        passengers: selectedSeats.map(seat => passengersInfo[seat]),
+        totalAmount: calculateTotal(),
+        serviceFee,
+        paymentMethod,
+        bookingDate: new Date().toISOString()
+      };
+      
+      // Simulate API request delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
-  const proceedToPayment = () => {
-    // Validate all passenger info is filled
-    for (const seat of selectedSeats) {
-      if (!passengersInfo[seat]?.name || !passengersInfo[seat]?.idNumber) {
-        Alert.alert(t('missingInfo'), `${t('fillAllInfo')} ${seat}`);
-        return;
+      console.log('Booking data:', bookingData);
+      
+      setConfirmModalVisible(false);
+      
+      if (paymentMethod === 'momo') {
+        setPaymentAmount(calculateTotal().toLocaleString());
+        setPaymentModalVisible(true);
+      } else {
+        showSnackbar(
+          t('bookingConfirmationMessage', {
+            count: selectedSeats.length,
+            agency: agencyName,
+            total: calculateTotal().toLocaleString()
+          }), 
+          'success'
+        );
+        setTimeout(() => router.back(), 3500);
       }
+    } catch (error) {
+      showSnackbar(t('bookingSaveError'), 'error');
+    } finally {
+      setIsProcessingPayment(false);
     }
-    
-    setConfirmModalVisible(false);
-    setPaymentAmount(calculateTotal().toLocaleString());
-    setPaymentModalVisible(true);
   };
 
   const completePayment = () => {
-    if (!momoNumber) {
-      Alert.alert(t('paymentError'), t('provideMomoNumber'));
+    if (!momoNumber && paymentMethod === 'momo') {
+      showSnackbar(t('provideMomoNumber'), 'error');
       return;
     }
     
     setPaymentModalVisible(false);
-    Alert.alert(
-      t('bookingConfirmed'),
+    showSnackbar(
       t('paymentConfirmationMessage', {
         count: selectedSeats.length,
         agency: agencyName,
         total: calculateTotal().toLocaleString()
       }),
-      [{ text: 'OK', onPress: () => router.back() }]
+      'success'
     );
+    setTimeout(() => router.back(), 3500);
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>{t('bookYourSeats')}</Text>
-      <Text style={styles.agencyName}>{agencyName}</Text>
-      <Text style={styles.routeText}>
-        {location} → {destination}
-      </Text>
-      
-      <View style={styles.busTypeContainer}>
-        <Text style={styles.label}>{t('selectBusType')}</Text>
-        <TouchableOpacity 
-          style={styles.dropdownButton}
-          onPress={() => setBusTypeModalVisible(true)}
-        >
-          <Text style={styles.dropdownButtonText}>
-            {selectedBus.name}
-          </Text>
-          <Text style={styles.dropdownArrow}>▼</Text>
-        </TouchableOpacity>
-      </View>
-      
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={busTypeModalVisible}
-        onRequestClose={() => setBusTypeModalVisible(false)}
+    <View style={styles.mainContainer}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t('selectBusType')}</Text>
-            {busTypes.map(bus => (
-              <Pressable
-                key={bus.id}
-                style={[styles.modalOption, selectedBusType === bus.id && styles.selectedOption]}
-                onPress={() => {
-                  setSelectedBusType(bus.id);
-                  setSelectedSeats([]);
-                  setBusTypeModalVisible(false);
-                }}
-              >
-                <Text style={styles.modalOptionText}>{bus.name}</Text>
-                <Text style={styles.modalOptionPrice}>FCFA {bus.basePrice.toLocaleString()} {t('pricePerSeat')}</Text>
-              </Pressable>
-            ))}
-            <Pressable
-              style={[styles.modalCloseButton, styles.cancelButton]}
-              onPress={() => setBusTypeModalVisible(false)}
-            >
-              <Text style={styles.confirmModalButtonText}>{t('cancel')}</Text>
-            </Pressable>
-          </View>
+        <Text style={styles.title}>{t('bookYourSeats')}</Text>
+        <Text style={styles.agencyName}>{agencyName}</Text>
+        <View style={styles.routeContainer}>
+          <Text style={styles.routeTextArrow}>{location}</Text>
+          <MaterialIcons name="arrow-forward" size={16} color="#2c3e50" />
+          <Text style={styles.routeTextArrow}>{destination}</Text>
         </View>
-      </Modal>
-      
-      <View style={styles.seatInfoContainer}>
-        <Text style={styles.seatInfoText}>
-          {t('availableSeats')}: {selectedBus.totalSeats - selectedSeats.length} / {selectedBus.totalSeats}
-        </Text>
-        <Text style={styles.seatInfoText}>
-          {t('pricePerSeat')}: FCFA {selectedBus.basePrice.toLocaleString()}
-        </Text>
-      </View>
-      
-      <View style={styles.legendContainer}>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: '#2ecc71' }]} />
-          <Text style={styles.legendText}>{t('selected')}</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: '#ecf0f1' }]} />
-          <Text style={styles.legendText}>{t('available')}</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: '#95a5a6' }]} />
-          <Text style={styles.legendText}>{t('booked')}</Text>
-        </View>
-      </View>
-      
-      <View style={styles.seatLayout}>
-        {Object.entries(rows).map(([row, seats]) => {
-          const isFirstRow = parseInt(row) === 1;
-          const isLastRow = parseInt(row) === Math.max(...Object.keys(rows).map(Number));
-          
-          return (
-            <View key={row} style={styles.row}>
-              <View style={styles.seatsInRow}>
-                {seats.map((seat: Seat, index: number) => {
-                  const addSpace = !isFirstRow && !isLastRow && 
-                                 seat.position === 'left' && 
-                                 index === 2;
-                  
-                  return (
-                    <View key={seat.seatNumber} style={addSpace ? styles.spacedSeatContainer : null}>
-                      <TouchableOpacity
-                        style={[
-                          styles.seat,
-                          seat.isDriverSeat && styles.driverSeat,
-                          !seat.isAvailable && styles.bookedSeat,
-                          selectedSeats.includes(seat.seatNumber) && styles.selectedSeat,
-                          seat.position === 'left' && styles.leftSeat,
-                          seat.position === 'right' && styles.rightSeat,
-                        ]}
-                        onPress={() => toggleSeatSelection(seat.seatNumber, seat.isAvailable)}
-                        disabled={!seat.isAvailable}
-                      >
-                        <Text style={styles.seatText}>
-                          {seat.isDriverSeat ? t('driver') : seat.seatNumber}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
-          );
-        })}
-      </View>
-      
-      {selectedSeats.length > 0 && (
-        <View style={styles.summaryContainer}>
-          <Text style={styles.summaryTitle}>{t('bookingSummary')}</Text>
-          
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>{t('selectedSeatsLabel')}</Text>
-            <Text style={styles.summaryValue}>{selectedSeats.join(', ')}</Text>
-          </View>
-          
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>{t('seatPriceLabel')}</Text>
-            <Text style={styles.summaryValue}>
-              {selectedSeats.length} × FCFA {selectedBus.basePrice.toLocaleString()}
-            </Text>
-          </View>
-          
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>{t('serviceFeeLabel')}</Text>
-            <Text style={styles.summaryValue}>FCFA {serviceFee.toLocaleString()}</Text>
-          </View>
-          
-          <View style={styles.summaryDivider} />
-          
-          <View style={[styles.summaryRow, styles.totalRow]}>
-            <Text style={[styles.summaryLabel, styles.totalLabel]}>{t('totalLabel')}</Text>
-            <Text style={[styles.summaryValue, styles.totalValue]}>
-              FCFA {calculateTotal().toLocaleString()}
-            </Text>
-          </View>
-          
+        
+        <View style={styles.busTypeContainer}>
+          <Text style={styles.label}>{t('selectBusType')}</Text>
           <TouchableOpacity 
-            style={styles.bookButton}
-            onPress={handleBookSeats}
+            style={styles.dropdownButton}
+            onPress={() => setBusTypeModalVisible(true)}
           >
-            <Text style={styles.bookButtonText}>
-              {t('confirmBooking')} - FCFA {calculateTotal().toLocaleString()}
+            <Text style={styles.dropdownButtonText}>
+              {selectedBus.name}
             </Text>
+            <Text style={styles.dropdownArrow}>▼</Text>
           </TouchableOpacity>
         </View>
-      )}
+        
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={busTypeModalVisible}
+          onRequestClose={() => setBusTypeModalVisible(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>{t('selectBusType')}</Text>
+              <ScrollView>
+                {busTypes.map(bus => (
+                  <Pressable
+                    key={bus.id}
+                    style={[styles.modalOption, selectedBusType === bus.id && styles.selectedOption]}
+                    onPress={() => {
+                      setSelectedBusType(bus.id);
+                      setSelectedSeats([]);
+                      setBusTypeModalVisible(false);
+                    }}
+                  >
+                    <Text style={styles.modalOptionText}>{bus.name}</Text>
+                    <Text style={styles.modalOptionPrice}>FCFA {bus.basePrice.toLocaleString()} {t('pricePerSeat')}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <Pressable
+                style={[styles.modalCloseButton, styles.cancelButton]}
+                onPress={() => setBusTypeModalVisible(false)}
+              >
+                <Text style={styles.confirmModalButtonText}>{t('cancel')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+        
+        <View style={styles.seatInfoContainer}>
+          <Text style={styles.seatInfoText}>
+            {t('availableSeats')}: {selectedBus.totalSeats - selectedSeats.length} / {selectedBus.totalSeats}
+          </Text>
+          <Text style={styles.seatInfoText}>
+            {t('pricePerSeat')}: FCFA {selectedBus.basePrice.toLocaleString()}
+          </Text>
+        </View>
+        
+        <View style={styles.legendContainer}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendColor, { backgroundColor: '#2ecc71' }]} />
+            <Text style={styles.legendText}>{t('selected')}</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendColor, { backgroundColor: '#ecf0f1' }]} />
+            <Text style={styles.legendText}>{t('available')}</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendColor, { backgroundColor: '#95a5a6' }]} />
+            <Text style={styles.legendText}>{t('booked')}</Text>
+          </View>
+        </View>
+        
+        <View style={styles.seatLayout}>
+          {Object.entries(rows).map(([row, seats]) => {
+            const isFirstRow = parseInt(row) === 1;
+            const isLastRow = parseInt(row) === Math.max(...Object.keys(rows).map(Number));
+            
+            return (
+              <View key={row} style={styles.row}>
+                <View style={styles.seatsInRow}>
+                  {seats.map((seat: Seat, index: number) => {
+                    const addSpace = !isFirstRow && !isLastRow && 
+                                   seat.position === 'left' && 
+                                   index === 2;
+                    
+                    return (
+                      <View key={seat.seatNumber} style={addSpace ? styles.spacedSeatContainer : null}>
+                        <TouchableOpacity
+                          style={[
+                            styles.seat,
+                            seat.isDriverSeat && styles.driverSeat,
+                            !seat.isAvailable && styles.bookedSeat,
+                            selectedSeats.includes(seat.seatNumber) && styles.selectedSeat,
+                          ]}
+                          onPress={() => toggleSeatSelection(seat.seatNumber, seat.isAvailable)}
+                          disabled={!seat.isAvailable}
+                        >
+                          <Text style={styles.seatText}>
+                            {seat.isDriverSeat ? t('driver') : seat.seatNumber}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+        
+        {selectedSeats.length > 0 && (
+          <View style={styles.summaryContainer}>
+            <Text style={styles.summaryTitle}>{t('bookingSummary')}</Text>
+            
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>{t('selectedSeatsLabel')}</Text>
+              <Text style={styles.summaryValue}>{selectedSeats.join(', ')}</Text>
+            </View>
+            
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>{t('seatPriceLabel')}</Text>
+              <Text style={styles.summaryValue}>
+                {selectedSeats.length} × FCFA {selectedBus.basePrice.toLocaleString()}
+              </Text>
+            </View>
+            
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>{t('serviceFeeLabel')}</Text>
+              <Text style={styles.summaryValue}>FCFA {serviceFee.toLocaleString()}</Text>
+            </View>
+            
+            <View style={styles.summaryDivider} />
+            
+            <View style={[styles.summaryRow, styles.totalRow]}>
+              <Text style={[styles.summaryLabel, styles.totalLabel]}>{t('totalLabel')}</Text>
+              <Text style={[styles.summaryValue, styles.totalValue]}>
+                FCFA {calculateTotal().toLocaleString()}
+              </Text>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.bookButton}
+              onPress={handleBookSeats}
+            >
+              <Text style={styles.bookButtonText}>
+                {t('confirmBooking')} - FCFA {calculateTotal().toLocaleString()}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
       
       <Modal
         animationType="fade"
@@ -430,7 +538,41 @@ export default function BookingScreen() {
                 total: calculateTotal().toLocaleString()
               })}
             </Text>
-            
+
+            <View style={styles.paymentMethodContainer}>
+              <Text style={styles.paymentMethodLabel}>{t('paymentMethod')}</Text>
+              <View style={styles.paymentMethodOptions}>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentMethodButton,
+                    paymentMethod === 'cash' && styles.selectedPaymentMethod
+                  ]}
+                  onPress={() => setPaymentMethod('cash')}
+                >
+                  <Text style={[
+                    styles.paymentMethodText,
+                    paymentMethod === 'cash' && styles.selectedPaymentMethodText
+                  ]}>
+                    {t('cash')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentMethodButton,
+                    paymentMethod === 'momo' && styles.selectedPaymentMethod
+                  ]}
+                  onPress={() => setPaymentMethod('momo')}
+                >
+                  <Text style={[
+                    styles.paymentMethodText,
+                    paymentMethod === 'momo' && styles.selectedPaymentMethodText
+                  ]}>
+                    {t('momo')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <ScrollView style={styles.passengerFormContainer}>
               {selectedSeats.map(seat => (
                 <View key={seat} style={styles.passengerForm}>
@@ -453,26 +595,6 @@ export default function BookingScreen() {
                     value={passengersInfo[seat]?.idNumber || ''}
                     onChangeText={(text) => handlePassengerInfoChange(seat, 'idNumber', text)}
                   />
-                  
-                  <Text style={styles.inputLabel}>{t('idCardPhoto')}</Text>
-                  <TouchableOpacity 
-                    style={styles.photoButton}
-                    onPress={() => pickImage(seat)}
-                    disabled={activeSeatForPhoto !== null}
-                  >
-                    <Text style={styles.photoButtonText}>
-                      {passengersInfo[seat]?.idPhoto ? t('changePhoto') : t('selectPhoto')}
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  {passengersInfo[seat]?.idPhoto && (
-                    <View style={styles.photoPreviewContainer}>
-                      <Image 
-                        source={{ uri: passengersInfo[seat]?.idPhoto }} 
-                        style={styles.photoPreview}
-                      />
-                    </View>
-                  )}
                 </View>
               ))}
             </ScrollView>
@@ -482,26 +604,15 @@ export default function BookingScreen() {
                 style={[styles.confirmModalButton, styles.cancelButton]}
                 onPress={() => setConfirmModalVisible(false)}
               >
-                <Text 
-                  style={styles.confirmModalButtonText}
-                  numberOfLines={1} 
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.8}
-                >
-                  {t('cancel')}
-                </Text>
+                <Text style={styles.confirmModalButtonText}>{t('cancel')}</Text>
               </Pressable>
               <Pressable
                 style={[styles.confirmModalButton, styles.confirmButton]}
-                onPress={proceedToPayment}
+                onPress={confirmBooking}
+                disabled={isProcessingPayment}
               >
-                <Text 
-                  style={styles.confirmModalButtonText}
-                  numberOfLines={1} 
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.8}
-                >
-                  {t('proceedToPayment')}
+                <Text style={styles.confirmModalButtonText}>
+                  {isProcessingPayment ? t('processing') : t('confirmBooking')}
                 </Text>
               </Pressable>
             </View>
@@ -509,7 +620,6 @@ export default function BookingScreen() {
         </View>
       </Modal>
 
-      {/* Payment Modal */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -563,39 +673,54 @@ export default function BookingScreen() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+
+      <Snackbar
+        visible={snackbar.visible}
+        message={snackbar.message}
+        type={snackbar.type}
+        onDismiss={hideSnackbar}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
+  mainContainer: {
+    flex: 1,
     backgroundColor: '#fff',
-    paddingBottom: 40,
+  },
+  scrollContainer: {
+    padding: 16,
+    paddingBottom: 32,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 8,
     textAlign: 'center',
     color: '#2c3e50',
   },
   agencyName: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 20,
+    marginBottom: 8,
     textAlign: 'center',
     color: '#3498db',
   },
-  routeText: {
+  routeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  routeTextArrow: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 20,
-    textAlign: 'center',
     color: '#2c3e50',
+    marginHorizontal: 12,
   },
   busTypeContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   label: {
     fontSize: 16,
@@ -607,7 +732,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    padding: 15,
+    padding: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -628,21 +753,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   modalContent: {
-    width: '80%',
+    width: '90%',
+    maxWidth: 400,
     backgroundColor: 'white',
     borderRadius: 10,
-    padding: 20,
+    padding: 16,
     maxHeight: '80%',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 15,
+    marginBottom: 12,
     textAlign: 'center',
     color: '#2c3e50',
   },
   modalOption: {
-    padding: 15,
+    padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
@@ -659,7 +785,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   modalCloseButton: {
-    marginTop: 15,
+    marginTop: 12,
     padding: 12,
     borderRadius: 6,
     alignItems: 'center',
@@ -667,8 +793,8 @@ const styles = StyleSheet.create({
   seatInfoContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
-    paddingHorizontal: 10,
+    marginBottom: 16,
+    paddingHorizontal: 8,
   },
   seatInfoText: {
     fontSize: 14,
@@ -678,14 +804,14 @@ const styles = StyleSheet.create({
   legendContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 20,
-    paddingHorizontal: 10,
+    marginBottom: 16,
+    paddingHorizontal: 8,
     flexWrap: 'wrap',
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    margin: 5,
+    margin: 4,
   },
   legendColor: {
     width: 16,
@@ -698,13 +824,12 @@ const styles = StyleSheet.create({
     color: '#34495e',
   },
   seatLayout: {
-    marginBottom: 20,
+    marginBottom: 16,
     alignItems: 'center',
   },
   row: {
-    marginBottom: 15,
+    marginBottom: 12,
     width: '100%',
-    maxWidth: 360,
   },
   seatsInRow: {
     flexDirection: 'row',
@@ -712,23 +837,20 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   spacedSeatContainer: {
-    marginRight: 30,
+    marginRight: 24,
   },
   seat: {
-    width: 48,
-    height: 48,
+    width: 40,
+    height: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    margin: 6,
-    borderRadius: 8,
+    margin: 4,
+    borderRadius: 6,
     backgroundColor: '#ecf0f1',
-    elevation: 2,
   },
-  leftSeat: {},
-  rightSeat: {},
   driverSeat: {
-    backgroundColor: 'red',
-    width: 150,
+    backgroundColor: '#e74c3c',
+    width: 120,
     opacity: 0.7,
   },
   bookedSeat: {
@@ -745,57 +867,56 @@ const styles = StyleSheet.create({
   },
   summaryContainer: {
     backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 20,
-    marginTop: 20,
+    borderRadius: 10,
+    padding: 16,
+    marginTop: 16,
     borderWidth: 1,
     borderColor: '#eaeaea',
   },
   summaryTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 15,
+    marginBottom: 12,
     color: '#2c3e50',
     textAlign: 'center',
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   summaryLabel: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#7f8c8d',
   },
   summaryValue: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#2c3e50',
   },
   summaryDivider: {
     height: 1,
     backgroundColor: '#ddd',
-    marginVertical: 10,
+    marginVertical: 8,
   },
   totalRow: {
-    marginTop: 5,
+    marginTop: 4,
   },
   totalLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 'bold',
   },
   totalValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#27ae60',
   },
   bookButton: {
     backgroundColor: '#3498db',
-    padding: 15,
+    padding: 14,
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 20,
-    elevation: 3,
+    marginTop: 16,
   },
   bookButtonText: {
     color: 'white',
@@ -810,49 +931,44 @@ const styles = StyleSheet.create({
   },
   confirmModalContent: {
     width: '90%',
+    maxWidth: 400,
     backgroundColor: 'white',
     borderRadius: 10,
-    padding: 20,
-    maxHeight: '90%',
+    padding: 16,
+    maxHeight: '80%',
   },
   confirmModalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 8,
     textAlign: 'center',
     color: '#2c3e50',
   },
   confirmModalText: {
-    fontSize: 16,
-    color: '#34495e',
-    marginBottom: 5,
-    textAlign: 'center',
-  },
-  confirmModalSeats: {
     fontSize: 14,
-    color: '#7f8c8d',
-    marginBottom: 15,
+    color: '#34495e',
+    marginBottom: 12,
     textAlign: 'center',
   },
   passengerFormContainer: {
-    maxHeight: 300,
-    marginBottom: 15,
+    maxHeight: Dimensions.get('window').height * 0.4,
+    marginBottom: 12,
   },
   passengerForm: {
-    marginBottom: 20,
-    paddingBottom: 15,
+    marginBottom: 16,
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   passengerFormTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 10,
+    marginBottom: 8,
     color: '#2c3e50',
   },
   inputLabel: {
-    fontSize: 14,
-    marginBottom: 5,
+    fontSize: 13,
+    marginBottom: 4,
     color: '#34495e',
   },
   input: {
@@ -860,44 +976,23 @@ const styles = StyleSheet.create({
     borderColor: '#ddd',
     borderRadius: 6,
     padding: 10,
-    marginBottom: 10,
+    marginBottom: 8,
     backgroundColor: '#f8f9fa',
-  },
-  photoButton: {
-    backgroundColor: '#3498db',
-    padding: 10,
-    borderRadius: 6,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  photoButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  photoPreviewContainer: {
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  photoPreview: {
-    width: 150,
-    height: 100,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    fontSize: 14,
   },
   confirmModalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 10,
-    gap: 10, // Adds consistent spacing between buttons
+    marginTop: 8,
+    gap: 8,
   },
   confirmModalButton: {
     flex: 1,
     padding: 12,
     borderRadius: 6,
-    justifyContent: 'center', // Center vertically
-    alignItems: 'center', // Center horizontally
-    minHeight: 44, // Minimum touch target size
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 44,
   },
   cancelButton: {
     backgroundColor: '#e74c3c',
@@ -908,40 +1003,90 @@ const styles = StyleSheet.create({
   confirmModalButtonText: {
     color: 'white',
     fontWeight: 'bold',
-    textAlign: 'center', // Ensure text alignment
-    width: '100%', // Take full width of button
-    paddingHorizontal: 4, // Prevent text from touching edges
+    textAlign: 'center',
+    width: '100%',
+    fontSize: 14,
   },
   paymentForm: {
-    marginVertical: 15,
+    marginVertical: 12,
   },
   disabledInput: {
     backgroundColor: '#f0f0f0',
     color: '#666',
   },
   phoneInputContainer: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  marginBottom: 10,
-},
-countryCodeContainer: {
-  backgroundColor: '#f8f9fa',
-  padding: 9,
-  borderWidth: 1,
-  borderColor: '#ddd',
-  borderRightWidth: 0,
-  borderTopLeftRadius: 6,
-  borderBottomLeftRadius: 6,
-  marginBottom: 10,
-},
-countryCodeText: {
-  fontSize: 16,
-  color: '#2c3e50',
-},
-phoneInput: {
-  flex: 1,
-  borderTopLeftRadius: 0,
-  borderBottomLeftRadius: 0,
-  borderLeftWidth: 0,
-},
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  countryCodeContainer: {
+    backgroundColor: '#f8f9fa',
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRightWidth: 0,
+    borderTopLeftRadius: 6,
+    borderBottomLeftRadius: 6,
+  },
+  countryCodeText: {
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  phoneInput: {
+    flex: 1,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderLeftWidth: 0,
+  },
+  snackbar: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: '#2ecc71',
+    padding: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  snackbarText: {
+    color: 'white',
+    fontSize: 14,
+    flex: 1,
+  },
+  paymentMethodContainer: {
+    marginBottom: 16,
+  },
+  paymentMethodLabel: {
+    fontSize: 14,
+    marginBottom: 8,
+    color: '#34495e',
+  },
+  paymentMethodOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  paymentMethodButton: {
+    flex: 1,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  selectedPaymentMethod: {
+    backgroundColor: '#3498db',
+    borderColor: '#3498db',
+  },
+  paymentMethodText: {
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  selectedPaymentMethodText: {
+    color: 'white',
+  },
 });

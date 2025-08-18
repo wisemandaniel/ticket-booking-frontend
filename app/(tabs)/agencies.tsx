@@ -1,55 +1,207 @@
-import { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, Pressable } from 'react-native';
-import { mockAgencies } from '../mockData';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  TouchableOpacity, 
+  ActivityIndicator, 
+  Modal, 
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Alert,
+  TextInput
+} from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
+import api from '@/services/api';
 
 const cities = ['Buea', 'Limbe', 'Douala', 'Bamenda', 'Yaounde', 'Baffoussam'];
 
+interface Agency {
+  _id: string;
+  name: string;
+  destinations: string[];
+  location?: string;
+  contactInfo?: {
+    phone: string;
+    email?: string;
+    address?: string;
+  };
+}
+
 export default function AgenciesScreen() {
   const { t } = useLanguage();
+  const { authToken } = useAuth();
   const [location, setLocation] = useState('');
   const [destination, setDestination] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showDestinationPicker, setShowDestinationPicker] = useState(false);
+  const [agencies, setAgencies] = useState<Agency[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
-  const renderAgency = ({ item, index }: { item: any; index: number }) => (
-  <TouchableOpacity 
-    style={[
-      styles.agencyCard,
-      (!location || !destination) && styles.disabledCard,
-      index === mockAgencies.length - 1 && styles.lastCard // Add this line
-    ]}
-    onPress={() => {
-      if (location && destination) {
-        router.push({
-          pathname: `/booking/${item.buses[0].id}`,
-          params: { 
-            agencyName: item.name,
-            location,
-            destination,
-          }
-        });
+  // Debounce search query
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setPage(1); // Reset to first page when search changes
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  // Fetch agencies data using the actual API
+  const fetchAgencies = useCallback(async (pageNum = 1) => {
+    try {
+      setLoading(pageNum === 1);
+      setError(null);
+      
+      const response = await api.get('/agencies', {
+        headers: {
+          Authorization: `Bearer ${authToken}`
+        }
+      });
+      
+      const normalizedAgencies = response.data.data?.agencies?.map((agency: any) => ({
+        ...agency,
+        destinations: agency.destinations || []
+      })) || [];
+      
+      setAgencies(pageNum === 1 ? normalizedAgencies : [...agencies, ...normalizedAgencies]);
+      setHasMore(normalizedAgencies.length > 0);
+    } catch (err: any) {
+      setError(err.response?.data?.message || t('errorLoadingAgencies'));
+      if (err.response?.status === 401) {
+        router.replace('/login');
       }
-    }}
-  >
-    <Text style={styles.agencyName}>{item.name}</Text>
-    <Text style={styles.agencyLocation}>{item.location}</Text>
-    <Text style={styles.agencyDestinations}>
-      {t('destinations')}: {item.destinations.join(', ')}
-    </Text>
-    {(!location || !destination) && (
-      <Text style={styles.selectRouteText}>{t('selectRouteText')}</Text>
-    )}
-  </TouchableOpacity>
-);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
-  const renderPickerModal = (
-    visible: boolean, 
-    onClose: () => void, 
-    onSelect: (city: string) => void, 
-    selectedValue: string
-  ) => (
+  // Initial load and refresh
+  useEffect(() => {
+    fetchAgencies();
+  }, [fetchAgencies]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setPage(1);
+    fetchAgencies(1);
+  };
+
+  const handleLoadMore = () => {
+    if (!loading && hasMore) {
+      setPage(prev => prev + 1);
+      fetchAgencies(page + 1);
+    }
+  };
+
+  // Filter agencies based on search and route selection
+  const filteredAgencies = useMemo(() => {
+    return agencies.filter(agency => {
+      const matchesSearch = agency.name.toLowerCase().includes(debouncedSearchQuery.toLowerCase());
+      if (!location && !destination) return matchesSearch;
+      return matchesSearch && 
+             (!location || agency.destinations.includes(location)) && 
+             (!destination || agency.destinations.includes(destination));
+    });
+  }, [agencies, location, destination, debouncedSearchQuery]);
+
+  const handleAgencyPress = (agency: Agency) => {
+    if (!location || !destination) {
+      Alert.alert(
+        t('routeNotSelected'),
+        t('pleaseSelectRouteFirst'),
+        [{ text: t('ok') }]
+      );
+      return;
+    }
+
+    router.push({
+      pathname: '/booking/[busId]',
+      params: {
+        busId: 'default',
+        agencyName: agency.name,
+        location,
+        destination,
+        agencyId: agency._id
+      }
+    });
+  };
+
+  const renderAgency = ({ item, index }: { item: Agency; index: number }) => {
+    const destinations = item.destinations || [];
+    const canBook = location && destination;
+
+    return (
+      <TouchableOpacity 
+        style={[
+          styles.agencyCard,
+          !canBook && styles.disabledCard,
+          index === filteredAgencies.length - 1 && styles.lastCard
+        ]}
+        onPress={() => handleAgencyPress(item)}
+        disabled={!canBook}
+        accessibilityLabel={`Agency: ${item.name}`}
+        accessibilityRole="button"
+      >
+        <View style={styles.agencyHeader}>
+          <Text style={styles.agencyName}>{item.name}</Text>
+          {item.contactInfo?.phone && (
+            <Text style={styles.agencyPhone}>
+              <MaterialIcons name="phone" size={14} color="#3498db" /> {item.contactInfo.phone}
+            </Text>
+          )}
+        </View>
+        
+        {item.location && (
+          <Text style={styles.agencyLocation}>
+            <MaterialIcons name="location-on" size={14} color="#666" /> {item.location}
+          </Text>
+        )}
+        
+        <Text style={styles.agencyDestinations}>
+          <MaterialIcons name="map" size={14} color="#444" /> {t('destinations')}: {destinations.join(', ')}
+        </Text>
+        
+        <View style={styles.agencyFooter}>
+          {!location || !destination ? (
+            <Text style={styles.selectRouteText}>
+              <MaterialIcons name="info" size={14} color="#e74c3c" /> {t('selectRouteText')}
+            </Text>
+          ) : (
+            <Text style={styles.busesAvailableText}>
+              <MaterialIcons name="directions-bus" size={14} color="#27ae60" /> {t('agencyAvailable')}
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const CityPickerModal = ({
+    visible,
+    onClose,
+    onSelect,
+    selectedValue,
+    title
+  }: {
+    visible: boolean;
+    onClose: () => void;
+    onSelect: (city: string) => void;
+    selectedValue: string;
+    title: string;
+  }) => (
     <Modal
       transparent={true}
       visible={visible}
@@ -58,20 +210,29 @@ export default function AgenciesScreen() {
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>{t('selectCity')}</Text>
-          {cities.map((city) => (
-            <Pressable
-              key={city}
-              style={[styles.cityItem, city === selectedValue && styles.selectedCity]}
-              onPress={() => {
-                onSelect(city);
-                onClose();
-              }}
-            >
-              <Text style={styles.cityText}>{city}</Text>
-            </Pressable>
-          ))}
-          <Pressable style={styles.cancelButton} onPress={onClose}>
+          <Text style={styles.modalTitle}>{title}</Text>
+          <ScrollView>
+            {cities.map((city) => (
+              <Pressable
+                key={city}
+                style={[styles.cityItem, city === selectedValue && styles.selectedCity]}
+                onPress={() => {
+                  onSelect(city);
+                  onClose();
+                }}
+                accessibilityLabel={`Select ${city}`}
+                accessibilityRole="button"
+              >
+                <Text style={styles.cityText}>{city}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Pressable 
+            style={styles.cancelButton} 
+            onPress={onClose}
+            accessibilityLabel="Cancel selection"
+            accessibilityRole="button"
+          >
             <Text style={styles.cancelButtonText}>{t('cancel')}</Text>
           </Pressable>
         </View>
@@ -79,9 +240,50 @@ export default function AgenciesScreen() {
     </Modal>
   );
 
+  if (loading && !refreshing && page === 1) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#2E86C1" />
+        <Text style={styles.loadingText}>{t('loadingAgencies')}</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={[styles.container, styles.errorContainer]}>
+        <MaterialIcons name="error-outline" size={50} color="#e74c3c" />
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity 
+          style={styles.retryButton}
+          onPress={() => {
+            setLoading(true);
+            fetchAgencies();
+          }}
+          accessibilityLabel="Retry loading agencies"
+          accessibilityRole="button"
+        >
+          <Text style={styles.retryButtonText}>{t('retry')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{t('agenciesTitle')}</Text>
+      
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder={t('searchAgencies')}
+          placeholderTextColor="#95a5a6"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          accessibilityLabel="Search agencies"
+        />
+        <MaterialIcons name="search" size={20} color="#95a5a6" style={styles.searchIcon} />
+      </View>
       
       <View style={styles.routeSelectionContainer}>
         <View style={styles.inputContainer}>
@@ -89,10 +291,13 @@ export default function AgenciesScreen() {
           <Pressable 
             style={styles.pickerInput}
             onPress={() => setShowLocationPicker(true)}
+            accessibilityLabel="Select current location"
+            accessibilityRole="button"
           >
             <Text style={location ? styles.pickerText : styles.pickerPlaceholder}>
               {location || t('selectLocation')}
             </Text>
+            <MaterialIcons name="arrow-drop-down" size={20} color="#95a5a6" />
           </Pressable>
         </View>
         
@@ -101,37 +306,85 @@ export default function AgenciesScreen() {
           <Pressable 
             style={styles.pickerInput}
             onPress={() => setShowDestinationPicker(true)}
+            accessibilityLabel="Select destination"
+            accessibilityRole="button"
           >
             <Text style={destination ? styles.pickerText : styles.pickerPlaceholder}>
               {destination || t('selectDestination')}
             </Text>
+            <MaterialIcons name="arrow-drop-down" size={20} color="#95a5a6" />
           </Pressable>
         </View>
       </View>
       
       <FlatList
-        data={mockAgencies}
+        data={filteredAgencies}
         renderItem={renderAgency}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item._id}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#2E86C1']}
+            tintColor={'#2E86C1'}
+          />
+        }
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>{t('noAgencies')}</Text>
+          <View style={styles.emptyContainer}>
+            {searchQuery ? (
+              <Text style={styles.emptyText}>
+                {t('noAgenciesMatchSearch')}
+              </Text>
+            ) : location && destination ? (
+              <Text style={styles.emptyText}>
+                {t('noAgenciesForRoute')}
+              </Text>
+            ) : (
+              <>
+                <Text style={styles.emptyText}>
+                  {t('selectRouteToViewAgencies')}
+                </Text>
+                <TouchableOpacity
+                  style={styles.showAllButton}
+                  onPress={() => {
+                    setLocation('');
+                    setDestination('');
+                    setSearchQuery('');
+                  }}
+                  accessibilityLabel="Show all agencies"
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.showAllButtonText}>{t('showAllAgencies')}</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        }
+        ListFooterComponent={
+          loading && page > 1 ? (
+            <ActivityIndicator size="small" color="#2E86C1" style={styles.footerLoader} />
+          ) : null
         }
       />
 
-      {renderPickerModal(
-        showLocationPicker,
-        () => setShowLocationPicker(false),
-        (city) => setLocation(city),
-        location
-      )}
+      <CityPickerModal
+        visible={showLocationPicker}
+        onClose={() => setShowLocationPicker(false)}
+        onSelect={(city) => setLocation(city)}
+        selectedValue={location}
+        title={t('selectLocation')}
+      />
 
-      {renderPickerModal(
-        showDestinationPicker,
-        () => setShowDestinationPicker(false),
-        (city) => setDestination(city),
-        destination
-      )}
+      <CityPickerModal
+        visible={showDestinationPicker}
+        onClose={() => setShowDestinationPicker(false)}
+        onSelect={(city) => setDestination(city)}
+        selectedValue={destination}
+        title={t('selectDestination')}
+      />
     </View>
   );
 }
@@ -148,6 +401,24 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
     color: '#2c3e50',
+  },
+  searchContainer: {
+    position: 'relative',
+    marginBottom: 15,
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 15,
+    paddingLeft: 40,
+    backgroundColor: '#f9f9f9',
+    fontSize: 16,
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: 12,
+    top: 15,
   },
   routeSelectionContainer: {
     marginBottom: 20,
@@ -172,6 +443,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 15,
     backgroundColor: '#f9f9f9',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   pickerText: {
     fontSize: 16,
@@ -192,34 +466,70 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#eee',
   },
-  disabledCard: {
-    opacity: 0.7,
+  agencyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   agencyName: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 5,
     color: '#2c3e50',
+    flex: 1,
+  },
+  agencyPhone: {
+    fontSize: 14,
+    color: '#3498db',
+    marginLeft: 10,
   },
   agencyLocation: {
     color: '#666',
     marginBottom: 5,
+    fontSize: 14,
   },
   agencyDestinations: {
     color: '#444',
-    fontStyle: 'italic',
     marginBottom: 5,
+    fontSize: 14,
+  },
+  agencyFooter: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  disabledCard: {
+    opacity: 0.7,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    padding: 20,
   },
   emptyText: {
     textAlign: 'center',
     marginTop: 20,
     color: '#666',
+    fontSize: 16,
+  },
+  showAllButton: {
+    marginTop: 15,
+    padding: 10,
+    backgroundColor: '#2E86C1',
+    borderRadius: 6,
+  },
+  showAllButtonText: {
+    color: 'white',
+    fontWeight: '600',
   },
   selectRouteText: {
     color: '#e74c3c',
     fontSize: 14,
-    marginTop: 5,
     fontStyle: 'italic',
+  },
+  busesAvailableText: {
+    color: '#27ae60',
+    fontSize: 14,
   },
   modalOverlay: {
     flex: 1,
@@ -267,4 +577,38 @@ const styles = StyleSheet.create({
   lastCard: {
     marginBottom: 70, 
   },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    color: '#2c3e50',
+  },
+  errorContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    color: '#e74c3c',
+    fontSize: 16,
+    marginBottom: 20,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  retryButton: {
+    backgroundColor: '#2E86C1',
+    padding: 12,
+    borderRadius: 6,
+    width: '50%',
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  footerLoader: {
+    marginVertical: 20,
+  }
 });
