@@ -35,7 +35,6 @@ interface Agency {
 
 export default function AgenciesScreen() {
   const { t } = useLanguage();
-  const { authToken } = useAuth();
   const [location, setLocation] = useState('');
   const [destination, setDestination] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,11 +63,7 @@ export default function AgenciesScreen() {
       setLoading(pageNum === 1);
       setError(null);
       
-      const response = await api.get('/agencies', {
-        headers: {
-          Authorization: `Bearer ${authToken}`
-        }
-      });
+      const response = await api.get('/agencies');
       
       const normalizedAgencies = response.data.data?.agencies?.map((agency: any) => ({
         ...agency,

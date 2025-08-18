@@ -104,6 +104,12 @@ export const agencyService = {
   getPopularAgencies: (limit: number = 5) => api.get('/agencies/popular', { params: { limit } }),
 };
 
+export const bookingsService = {
+  getDashboardStats: (userId: string) => api.get(`/bookings/stats/${userId}`),
+  getTravelHistory: (userId: string) => api.get(`/bookings/history/${userId}`),
+  getUpcomingTrips: (userId: string) => api.get(`/bookings/upcoming/${userId}`),
+};
+
 export const saveAuthToken = async (token: any) => {
   await SecureStore.setItemAsync('auth_token', token);
 };
