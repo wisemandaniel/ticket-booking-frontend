@@ -8,20 +8,13 @@ import {
   ScrollView, 
   ActivityIndicator,
   Animated,
-  Easing
+  Easing,
+  Switch
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { profileService } from '@/services/api';
-
-interface Profile {
-  fullName: string;
-  email: string;
-  address?: string;
-  idCardNumber?: string;
-  phoneNumber?: string;
-}
 
 const ProfileScreen = () => {
   const { t, language, toggleLanguage } = useLanguage();
@@ -96,6 +89,8 @@ const ProfileScreen = () => {
   };
 
   const handleUpdate = async () => {
+    console.log('Profile:', profile);
+    
     try {
       setIsUpdating(true);
       const updatedProfile = await profileService.updateProfile(profile);
@@ -237,6 +232,15 @@ const ProfileScreen = () => {
               />
             </View>
 
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>{t('idCardNumber')}</Text>
+              <TextInput
+                style={styles.input}
+                value={profile.idCardNumber || ''}
+                onChangeText={(text) => setProfile({...profile, idCardNumber: text})}
+              />
+            </View>
+
             <View style={styles.buttonContainer}>
               <TouchableOpacity
                 style={[styles.button, styles.cancelButton]}
@@ -284,12 +288,12 @@ const ProfileScreen = () => {
               </View>
             )}
 
-            {profile.idCardNumber && (
+            {/* {profile.idCardNumber && ( */}
               <View style={styles.profileInfo}>
                 <Text style={styles.label}>{t('idCardNumber')}</Text>
                 <Text style={styles.value}>{profile.idCardNumber}</Text>
               </View>
-            )}
+            {/* )} */}
           </View>
         )}
       </ScrollView>

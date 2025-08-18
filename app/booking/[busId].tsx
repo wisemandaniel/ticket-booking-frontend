@@ -5,19 +5,17 @@ import {
   StyleSheet, 
   TouchableOpacity, 
   ScrollView, 
-  Alert, 
   Modal, 
   Pressable, 
-  TextInput, 
-  Image,
-  Dimensions
+  TextInput,
+  Dimensions,
+  Animated
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
 import { mockAgencies } from '../mockData';
 import { useLanguage } from '../../contexts/LanguageContext';
-
-const { width: screenWidth } = Dimensions.get('window');
+import { MaterialIcons } from '@expo/vector-icons';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Seat {
   seatNumber: string;
@@ -37,13 +35,76 @@ interface BusType {
 interface PassengerInfo {
   name: string;
   idNumber: string;
-  idPhoto?: string;
 }
+
+interface SnackbarProps {
+  visible: boolean;
+  message: string;
+  type: 'success' | 'error' | 'info';
+  onDismiss: () => void;
+}
+
+const Snackbar: React.FC<SnackbarProps> = ({ visible, message, type, onDismiss }) => {
+  const [animation] = useState(new Animated.Value(0));
+
+  useEffect(() => {
+    if (visible) {
+      Animated.timing(animation, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+
+      const timer = setTimeout(() => {
+        onDismiss();
+      }, 3000);
+
+      return () => clearTimeout(timer);
+    } else {
+      Animated.timing(animation, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible]);
+
+  if (!visible) return null;
+
+  const backgroundColor = type === 'success' ? '#2ecc71' : 
+                         type === 'error' ? '#e74c3c' : '#3498db';
+
+  return (
+    <Animated.View 
+      style={[
+        styles.snackbar,
+        { 
+          backgroundColor,
+          opacity: animation,
+          transform: [
+            {
+              translateY: animation.interpolate({
+                inputRange: [0, 1],
+                outputRange: [50, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Text style={styles.snackbarText}>{message}</Text>
+      <TouchableOpacity onPress={onDismiss}>
+        <MaterialIcons name="close" size={20} color="white" />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
 
 export default function BookingScreen() {
   const { t } = useLanguage();
   const params = useLocalSearchParams();
   const { agencyName, location, destination, busId } = params;
+  const { user } = useAuth();
   
   const [selectedBusType, setSelectedBusType] = useState<string>('30');
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
@@ -52,9 +113,15 @@ export default function BookingScreen() {
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [passengersInfo, setPassengersInfo] = useState<Record<string, PassengerInfo>>({});
-  const [activeSeatForPhoto, setActiveSeatForPhoto] = useState<string | null>(null);
-  const [momoNumber, setMomoNumber] = useState('');
+  const [momoNumber, setMomoNumber] = useState(user?.whatsappNumber || user?.phoneNumber || '');
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'momo'>('cash');
+  const [snackbar, setSnackbar] = useState({
+    visible: false,
+    message: '',
+    type: 'success' as 'success' | 'error' | 'info',
+  });
   
   const agency = mockAgencies.find(a => a.name === agencyName) || mockAgencies[0];
   
@@ -70,13 +137,24 @@ export default function BookingScreen() {
     const newPassengersInfo: Record<string, PassengerInfo> = {};
     selectedSeats.forEach(seat => {
       if (!passengersInfo[seat]) {
-        newPassengersInfo[seat] = { name: '', idNumber: '' };
+        newPassengersInfo[seat] = { 
+          name: user?.fullName || user?.legalBusinessName || '', 
+          idNumber: user?.idCardNumber || '',
+        };
       } else {
         newPassengersInfo[seat] = passengersInfo[seat];
       }
     });
     setPassengersInfo(newPassengersInfo);
-  }, [selectedSeats]);
+  }, [selectedSeats, user]);
+
+  const showSnackbar = (message: string, type: 'success' | 'error' | 'info') => {
+    setSnackbar({ visible: true, message, type });
+  };
+
+  const hideSnackbar = () => {
+    setSnackbar({ ...snackbar, visible: false });
+  };
 
   const generateSeatLayout = (totalSeats: number): Seat[] => {
     const seats: Seat[] = [];
@@ -177,7 +255,7 @@ export default function BookingScreen() {
         return prev.filter(s => s !== seatNumber);
       } else {
         if (prev.length >= 5) {
-          Alert.alert(t('maximumSeats'), t('maxSeatsMessage'));
+          showSnackbar(t('maxSeatsMessage'), 'error');
           return prev;
         }
         return [...prev, seatNumber];
@@ -191,7 +269,7 @@ export default function BookingScreen() {
 
   const handleBookSeats = () => {
     if (selectedSeats.length === 0) {
-      Alert.alert(t('noSeatsSelected'), t('selectSeatsMessage'));
+      showSnackbar(t('selectSeatsMessage'), 'error');
       return;
     }
     setConfirmModalVisible(true);
@@ -207,70 +285,75 @@ export default function BookingScreen() {
     }));
   };
 
-  const pickImage = async (seatNumber: string) => {
-    setActiveSeatForPhoto(seatNumber);
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      handlePassengerInfoChange(seatNumber, 'idPhoto', result.assets[0].uri);
-    }
-    setActiveSeatForPhoto(null);
-  };
-
-  const confirmBooking = () => {
+  const confirmBooking = async () => {
     for (const seat of selectedSeats) {
       if (!passengersInfo[seat]?.name || !passengersInfo[seat]?.idNumber) {
-        Alert.alert(t('missingInfo'), `${t('fillAllInfo')} ${seat}`);
+        showSnackbar(`${t('fillAllInfo')} ${seat}`, 'error');
         return;
       }
     }
     
-    setConfirmModalVisible(false);
-    Alert.alert(
-      t('bookingConfirmed'),
-      t('bookingConfirmationMessage', {
-        count: selectedSeats.length,
-        agency: agencyName,
-        total: calculateTotal().toLocaleString()
-      }),
-      [{ text: 'OK', onPress: () => router.back() }]
-    );
-  };
+    try {
+      setIsProcessingPayment(true);
+      
+      // Simulate API call to save booking
+      const bookingData = {
+        agencyId: agency.name,
+        kickoff_location: location,
+        destination: destination,
+        busType: selectedBusType,
+        seats: selectedSeats,
+        passengers: selectedSeats.map(seat => passengersInfo[seat]),
+        totalAmount: calculateTotal(),
+        serviceFee,
+        paymentMethod,
+        bookingDate: new Date().toISOString()
+      };
+      
+      // Simulate API request delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
-  const proceedToPayment = () => {
-    for (const seat of selectedSeats) {
-      if (!passengersInfo[seat]?.name || !passengersInfo[seat]?.idNumber) {
-        Alert.alert(t('missingInfo'), `${t('fillAllInfo')} ${seat}`);
-        return;
+      console.log('Booking data:', bookingData);
+      
+      setConfirmModalVisible(false);
+      
+      if (paymentMethod === 'momo') {
+        setPaymentAmount(calculateTotal().toLocaleString());
+        setPaymentModalVisible(true);
+      } else {
+        showSnackbar(
+          t('bookingConfirmationMessage', {
+            count: selectedSeats.length,
+            agency: agencyName,
+            total: calculateTotal().toLocaleString()
+          }), 
+          'success'
+        );
+        setTimeout(() => router.back(), 3500);
       }
+    } catch (error) {
+      showSnackbar(t('bookingSaveError'), 'error');
+    } finally {
+      setIsProcessingPayment(false);
     }
-    
-    setConfirmModalVisible(false);
-    setPaymentAmount(calculateTotal().toLocaleString());
-    setPaymentModalVisible(true);
   };
 
   const completePayment = () => {
-    if (!momoNumber) {
-      Alert.alert(t('paymentError'), t('provideMomoNumber'));
+    if (!momoNumber && paymentMethod === 'momo') {
+      showSnackbar(t('provideMomoNumber'), 'error');
       return;
     }
     
     setPaymentModalVisible(false);
-    Alert.alert(
-      t('bookingConfirmed'),
+    showSnackbar(
       t('paymentConfirmationMessage', {
         count: selectedSeats.length,
         agency: agencyName,
         total: calculateTotal().toLocaleString()
       }),
-      [{ text: 'OK', onPress: () => router.back() }]
+      'success'
     );
+    setTimeout(() => router.back(), 3500);
   };
 
   return (
@@ -281,9 +364,11 @@ export default function BookingScreen() {
       >
         <Text style={styles.title}>{t('bookYourSeats')}</Text>
         <Text style={styles.agencyName}>{agencyName}</Text>
-        <Text style={styles.routeText}>
-          {location} → {destination}
-        </Text>
+        <View style={styles.routeContainer}>
+          <Text style={styles.routeTextArrow}>{location}</Text>
+          <MaterialIcons name="arrow-forward" size={16} color="#2c3e50" />
+          <Text style={styles.routeTextArrow}>{destination}</Text>
+        </View>
         
         <View style={styles.busTypeContainer}>
           <Text style={styles.label}>{t('selectBusType')}</Text>
@@ -453,7 +538,41 @@ export default function BookingScreen() {
                 total: calculateTotal().toLocaleString()
               })}
             </Text>
-            
+
+            <View style={styles.paymentMethodContainer}>
+              <Text style={styles.paymentMethodLabel}>{t('paymentMethod')}</Text>
+              <View style={styles.paymentMethodOptions}>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentMethodButton,
+                    paymentMethod === 'cash' && styles.selectedPaymentMethod
+                  ]}
+                  onPress={() => setPaymentMethod('cash')}
+                >
+                  <Text style={[
+                    styles.paymentMethodText,
+                    paymentMethod === 'cash' && styles.selectedPaymentMethodText
+                  ]}>
+                    {t('cash')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentMethodButton,
+                    paymentMethod === 'momo' && styles.selectedPaymentMethod
+                  ]}
+                  onPress={() => setPaymentMethod('momo')}
+                >
+                  <Text style={[
+                    styles.paymentMethodText,
+                    paymentMethod === 'momo' && styles.selectedPaymentMethodText
+                  ]}>
+                    {t('momo')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <ScrollView style={styles.passengerFormContainer}>
               {selectedSeats.map(seat => (
                 <View key={seat} style={styles.passengerForm}>
@@ -476,26 +595,6 @@ export default function BookingScreen() {
                     value={passengersInfo[seat]?.idNumber || ''}
                     onChangeText={(text) => handlePassengerInfoChange(seat, 'idNumber', text)}
                   />
-                  
-                  <Text style={styles.inputLabel}>{t('idCardPhoto')}</Text>
-                  <TouchableOpacity 
-                    style={styles.photoButton}
-                    onPress={() => pickImage(seat)}
-                    disabled={activeSeatForPhoto !== null}
-                  >
-                    <Text style={styles.photoButtonText}>
-                      {passengersInfo[seat]?.idPhoto ? t('changePhoto') : t('selectPhoto')}
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  {passengersInfo[seat]?.idPhoto && (
-                    <View style={styles.photoPreviewContainer}>
-                      <Image 
-                        source={{ uri: passengersInfo[seat]?.idPhoto }} 
-                        style={styles.photoPreview}
-                      />
-                    </View>
-                  )}
                 </View>
               ))}
             </ScrollView>
@@ -509,9 +608,12 @@ export default function BookingScreen() {
               </Pressable>
               <Pressable
                 style={[styles.confirmModalButton, styles.confirmButton]}
-                onPress={proceedToPayment}
+                onPress={confirmBooking}
+                disabled={isProcessingPayment}
               >
-                <Text style={styles.confirmModalButtonText}>{t('proceedToPayment')}</Text>
+                <Text style={styles.confirmModalButtonText}>
+                  {isProcessingPayment ? t('processing') : t('confirmBooking')}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -571,6 +673,13 @@ export default function BookingScreen() {
           </View>
         </View>
       </Modal>
+
+      <Snackbar
+        visible={snackbar.visible}
+        message={snackbar.message}
+        type={snackbar.type}
+        onDismiss={hideSnackbar}
+      />
     </View>
   );
 }
@@ -598,12 +707,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#3498db',
   },
-  routeText: {
+  routeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  routeTextArrow: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 20,
-    textAlign: 'center',
     color: '#2c3e50',
+    marginHorizontal: 12,
   },
   busTypeContainer: {
     marginBottom: 16,
@@ -837,7 +951,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   passengerFormContainer: {
-    maxHeight: Dimensions.get('window').height * 0.5,
+    maxHeight: Dimensions.get('window').height * 0.4,
     marginBottom: 12,
   },
   passengerForm: {
@@ -865,29 +979,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: '#f8f9fa',
     fontSize: 14,
-  },
-  photoButton: {
-    backgroundColor: '#3498db',
-    padding: 10,
-    borderRadius: 6,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  photoButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  photoPreviewContainer: {
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  photoPreview: {
-    width: 120,
-    height: 80,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#ddd',
   },
   confirmModalButtons: {
     flexDirection: 'row',
@@ -946,5 +1037,56 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 0,
     borderBottomLeftRadius: 0,
     borderLeftWidth: 0,
+  },
+  snackbar: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: '#2ecc71',
+    padding: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  snackbarText: {
+    color: 'white',
+    fontSize: 14,
+    flex: 1,
+  },
+  paymentMethodContainer: {
+    marginBottom: 16,
+  },
+  paymentMethodLabel: {
+    fontSize: 14,
+    marginBottom: 8,
+    color: '#34495e',
+  },
+  paymentMethodOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  paymentMethodButton: {
+    flex: 1,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  selectedPaymentMethod: {
+    backgroundColor: '#3498db',
+    borderColor: '#3498db',
+  },
+  paymentMethodText: {
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  selectedPaymentMethodText: {
+    color: 'white',
   },
 });
