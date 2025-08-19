@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Animated } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Animated, Dimensions } from 'react-native';
 import { router } from 'expo-router';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { bookingsService } from '../../services/api';
@@ -13,6 +13,9 @@ interface DashboardStats {
   upcomingBookings: number;
   pastBookings: number;
 }
+
+const { width } = Dimensions.get('window');
+const CARD_WIDTH = (width - 60) / 3; // 20px padding * 2 + 20px gap
 
 export default function DashboardScreen() {
   const { t } = useLanguage();
@@ -47,8 +50,8 @@ export default function DashboardScreen() {
         // Ensure all stats are numbers, defaulting to 0 if undefined
         const statsData = {
           totalBookings: Number(response.data.stats.totalBookings) || 0,
-          upcomingBookings: Number(response.data.stats.upcomingBookings) || 0,
-          pastBookings: Number(response.data.stats.pastBookings) || 0
+          upcomingBookings: Number(response.data.stats.upcomingTrips) || 0,
+          pastBookings: Number(response.data.stats.pastTrips) || 0
         };
         setStats(statsData);
         
@@ -159,42 +162,45 @@ export default function DashboardScreen() {
   }
 
   return (
-    <ScrollView 
-      contentContainerStyle={styles.container}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          colors={['#4a6fa5']}
-          tintColor="#4a6fa5"
-        />
-      }
-    >
-      <Text style={styles.title}>{t('dashboardTitle')}</Text>
-      
-      <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{stats.totalBookings}</Text>
-          <Text style={styles.statLabel}>{t('totalBookings')}</Text>
-        </View>
-        
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{stats.upcomingBookings}</Text>
-          <Text style={styles.statLabel}>{t('upcomingTrips')}</Text>
-        </View>
-        
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{stats.pastBookings}</Text>
-          <Text style={styles.statLabel}>{t('pastTrips')}</Text>
-        </View>
-      </View>
-      
-      <TouchableOpacity 
-        style={styles.button}
-        onPress={() => router.navigate('/travel-history')}
+    <View style={styles.mainContainer}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContainer}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#4a6fa5']}
+            tintColor="#4a6fa5"
+          />
+        }
+        showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.buttonText}>{t('viewTravelHistory')}</Text>
-      </TouchableOpacity>
+        <Text style={styles.title}>{t('dashboardTitle')}</Text>
+        
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{stats.totalBookings}</Text>
+            <Text style={styles.statLabel}>{t('totalBookings')}</Text>
+          </View>
+          
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{stats.upcomingBookings}</Text>
+            <Text style={styles.statLabel}>{t('upcomingTrips')}</Text>
+          </View>
+          
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{stats.pastBookings}</Text>
+            <Text style={styles.statLabel}>{t('pastTrips')}</Text>
+          </View>
+        </View>
+        
+        <TouchableOpacity 
+          style={styles.button}
+          onPress={() => router.navigate('/travel-history')}
+        >
+          <Text style={styles.buttonText}>{t('viewTravelHistory')}</Text>
+        </TouchableOpacity>
+      </ScrollView>
 
       {snackbar.visible && (
         <Animated.View 
@@ -213,14 +219,22 @@ export default function DashboardScreen() {
           </View>
         </Animated.View>
       )}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  scrollContainer: {
     flexGrow: 1,
     padding: 20,
+    paddingBottom: 40,
+  },
+  container: {
+    flex: 1,
     backgroundColor: '#fff',
   },
   center: {
@@ -228,97 +242,116 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: 30,
     color: '#2c3e50',
+    textAlign: 'center',
   },
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 30,
+    gap: 15,
   },
   statCard: {
+    flex: 1,
     backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 20,
-    width: '30%',
+    borderRadius: 16,
+    padding: 25,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 140,
+    minWidth: CARD_WIDTH,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { 
+      width: 0, 
+      height: 3 
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
   },
   statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 5,
+    fontSize: 36,
+    fontWeight: '800',
+    marginBottom: 10,
     color: '#4a6fa5',
   },
   statLabel: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#6c757d',
     textAlign: 'center',
+    fontWeight: '600',
+    lineHeight: 20,
   },
   button: {
     backgroundColor: '#4a6fa5',
-    padding: 16,
-    borderRadius: 8,
+    padding: 20,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { 
+      width: 0, 
+      height: 3 
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
   },
   buttonText: {
     color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
+    fontWeight: '600',
+    fontSize: 18,
   },
   errorText: {
     color: '#e74c3c',
     fontSize: 18,
     marginBottom: 20,
     textAlign: 'center',
+    marginHorizontal: 20,
   },
   retryButton: {
     backgroundColor: '#4a6fa5',
-    padding: 12,
-    borderRadius: 8,
-    width: 120,
+    padding: 16,
+    borderRadius: 12,
+    minWidth: 120,
     alignItems: 'center',
+    marginTop: 16,
   },
   retryButtonText: {
     color: 'white',
-    fontWeight: 'bold',
+    fontWeight: '600',
+    fontSize: 16,
   },
   snackbar: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    borderRadius: 8,
-    margin: 16,
+    bottom: 20,
+    left: 20,
+    right: 20,
+    borderRadius: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOffset: { 
+      width: 0, 
+      height: 4 
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
   snackbarContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    padding: 16,
   },
   snackbarText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 14,
     flex: 1,
     marginHorizontal: 12,
+    fontWeight: '500',
   },
   snackbarError: {
     backgroundColor: '#dc3545',
