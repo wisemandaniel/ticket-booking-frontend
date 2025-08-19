@@ -16,6 +16,7 @@ import { mockAgencies } from '../mockData';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
+import { bookingsService } from '@/services/api';
 
 interface Seat {
   seatNumber: string;
@@ -103,8 +104,8 @@ const Snackbar: React.FC<SnackbarProps> = ({ visible, message, type, onDismiss }
 export default function BookingScreen() {
   const { t } = useLanguage();
   const params = useLocalSearchParams();
-  const { agencyName, location, destination, busId } = params;
-  const { user } = useAuth();
+  const { agencyName, location, destination, busId }: any = params;
+  const { user }: any = useAuth();
   
   const [selectedBusType, setSelectedBusType] = useState<string>('30');
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
@@ -157,86 +158,86 @@ export default function BookingScreen() {
   };
 
   const generateSeatLayout = (totalSeats: number): Seat[] => {
-    const seats: Seat[] = [];
-    let seatNumber = 1;
-    
-    // Driver seat
-    seats.push({
-      seatNumber: 'DRIVER',
-      row: 1,
-      position: 'left',
-      isDriverSeat: true,
-      isAvailable: false
-    });
-    
-    // First row seats
-    seats.push({
-      seatNumber: seatNumber.toString(),
-      row: 1,
-      position: 'right',
-      isDriverSeat: false,
-      isAvailable: true
-    });
-    seatNumber++;
-    
-    seats.push({
-      seatNumber: seatNumber.toString(),
-      row: 1,
-      position: 'right',
-      isDriverSeat: false,
-      isAvailable: true
-    });
-    seatNumber++;
-    
-    const remainingSeats = totalSeats - 2;
-    const fullRows = Math.floor(remainingSeats / 5);
-    const lastRowSeats = remainingSeats % 5;
-    
-    let currentRow = 2;
-    for (let r = 0; r < fullRows; r++) {
-      // Left side seats (3 per row)
-      for (let i = 0; i < 3 && seatNumber <= totalSeats; i++) {
-        seats.push({
-          seatNumber: seatNumber.toString(),
-          row: currentRow,
-          position: 'left',
-          isDriverSeat: false,
-          isAvailable: true
-        });
-        seatNumber++;
-      }
-      
-      // Right side seats (2 per row)
-      for (let i = 0; i < 2 && seatNumber <= totalSeats; i++) {
-        seats.push({
-          seatNumber: seatNumber.toString(),
-          row: currentRow,
-          position: 'right',
-          isDriverSeat: false,
-          isAvailable: true
-        });
-        seatNumber++;
-      }
-      
-      currentRow++;
+  const seats: Seat[] = [];
+  let seatNumber = 1;
+  
+  // Driver seat - use a unique key that won't conflict with numeric seats
+  seats.push({
+    seatNumber: 'DRIVER',
+    row: 1,
+    position: 'left',
+    isDriverSeat: true,
+    isAvailable: false
+  });
+  
+  // First row seats
+  seats.push({
+    seatNumber: seatNumber.toString(),
+    row: 1,
+    position: 'right',
+    isDriverSeat: false,
+    isAvailable: true
+  });
+  seatNumber++;
+  
+  seats.push({
+    seatNumber: seatNumber.toString(),
+    row: 1,
+    position: 'right',
+    isDriverSeat: false,
+    isAvailable: true
+  });
+  seatNumber++;
+  
+  const remainingSeats = totalSeats - 2;
+  const fullRows = Math.floor(remainingSeats / 5);
+  const lastRowSeats = remainingSeats % 5;
+  
+  let currentRow = 2;
+  for (let r = 0; r < fullRows; r++) {
+    // Left side seats (3 per row)
+    for (let i = 0; i < 3 && seatNumber <= totalSeats; i++) {
+      seats.push({
+        seatNumber: seatNumber.toString(),
+        row: currentRow,
+        position: 'left',
+        isDriverSeat: false,
+        isAvailable: true
+      });
+      seatNumber++;
     }
     
-    // Last row seats if any remaining
-    if (lastRowSeats > 0) {
-      for (let i = 0; i < lastRowSeats && seatNumber <= totalSeats; i++) {
-        seats.push({
-          seatNumber: seatNumber.toString(),
-          row: currentRow,
-          position: i < 3 ? 'left' : 'right',
-          isDriverSeat: false,
-          isAvailable: true
-        });
-        seatNumber++;
-      }
+    // Right side seats (2 per row)
+    for (let i = 0; i < 2 && seatNumber <= totalSeats; i++) {
+      seats.push({
+        seatNumber: seatNumber.toString(),
+        row: currentRow,
+        position: 'right',
+        isDriverSeat: false,
+        isAvailable: true
+      });
+      seatNumber++;
     }
     
-    return seats;
-  };
+    currentRow++;
+  }
+  
+  // Last row seats if any remaining
+  if (lastRowSeats > 0) {
+    for (let i = 0; i < lastRowSeats && seatNumber <= totalSeats; i++) {
+      seats.push({
+        seatNumber: seatNumber.toString(),
+        row: currentRow,
+        position: i < 3 ? 'left' : 'right',
+        isDriverSeat: false,
+        isAvailable: true
+      });
+      seatNumber++;
+    }
+  }
+  
+  return seats;
+};
 
   const seatLayout = generateSeatLayout(selectedBus.totalSeats);
   const rows: Record<number, Seat[]> = {};
@@ -286,57 +287,70 @@ export default function BookingScreen() {
   };
 
   const confirmBooking = async () => {
-    for (const seat of selectedSeats) {
-      if (!passengersInfo[seat]?.name || !passengersInfo[seat]?.idNumber) {
-        showSnackbar(`${t('fillAllInfo')} ${seat}`, 'error');
-        return;
-      }
+  for (const seat of selectedSeats) {
+    if (!passengersInfo[seat]?.name || !passengersInfo[seat]?.idNumber) {
+      showSnackbar(`${t('fillAllInfo')} ${seat}`, 'error');
+      return;
     }
+  }
+  
+  try {
+    setIsProcessingPayment(true);
     
-    try {
-      setIsProcessingPayment(true);
-      
-      // Simulate API call to save booking
-      const bookingData = {
-        agencyId: agency.name,
-        kickoff_location: location,
-        destination: destination,
-        busType: selectedBusType,
-        seats: selectedSeats,
-        passengers: selectedSeats.map(seat => passengersInfo[seat]),
-        totalAmount: calculateTotal(),
-        serviceFee,
-        paymentMethod,
-        bookingDate: new Date().toISOString()
-      };
-      
-      // Simulate API request delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      console.log('Booking data:', bookingData);
-      
-      setConfirmModalVisible(false);
-      
-      if (paymentMethod === 'momo') {
-        setPaymentAmount(calculateTotal().toLocaleString());
-        setPaymentModalVisible(true);
-      } else {
-        showSnackbar(
-          t('bookingConfirmationMessage', {
-            count: selectedSeats.length,
-            agency: agencyName,
-            total: calculateTotal().toLocaleString()
-          }), 
-          'success'
-        );
-        setTimeout(() => router.back(), 3500);
-      }
-    } catch (error) {
-      showSnackbar(t('bookingSaveError'), 'error');
-    } finally {
-      setIsProcessingPayment(false);
+    // Prepare booking data with correct field names
+    const bookingData = {
+      user: user?._id, 
+      agency: agency.name,
+      kickoff_location: location,
+      destination: destination,
+      busType: selectedBusType,
+      seats: selectedSeats,
+      passengers: selectedSeats.map(seat => ({
+        name: passengersInfo[seat].name,
+        idNumber: passengersInfo[seat].idNumber
+      })),
+      totalAmount: calculateTotal(),
+      serviceFee,
+      paymentMethod,
+      momoNumber: paymentMethod === 'momo' ? momoNumber : undefined,
+      travelDate: new Date().toISOString(),
+      bookingReference: generateBookingReference(),
+    };
+    
+    // Make API call to create booking
+    const response = await bookingsService.createBooking(bookingData);
+    
+    console.log('Booking created successfully:', response.data);
+    
+    setConfirmModalVisible(false);
+    
+    if (paymentMethod === 'momo') {
+      setPaymentAmount(calculateTotal().toLocaleString());
+      setPaymentModalVisible(true);
+    } else {
+      showSnackbar(
+        t('bookingConfirmationMessage', {
+          count: selectedSeats.length,
+          agency: agencyName,
+          total: calculateTotal().toLocaleString()
+        }), 
+        'success'
+      );
+      setTimeout(() => router.back(), 3500);
     }
-  };
+  } catch (error) {
+    console.error('Booking creation error:', error);
+    showSnackbar(t('bookingSaveError'), 'error');
+  } finally {
+    setIsProcessingPayment(false);
+  }
+};
+
+const generateBookingReference = () => {
+  const timestamp = Date.now().toString(36);
+  const randomStr = Math.random().toString(36).substring(2, 8);
+  return `BUS-${timestamp}-${randomStr}`.toUpperCase();
+};
 
   const completePayment = () => {
     if (!momoNumber && paymentMethod === 'momo') {

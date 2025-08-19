@@ -11,7 +11,6 @@ export default function AuthScreen() {
   const { t, language, toggleLanguage } = useLanguage();
   const { 
     isAuthenticated, 
-    setIsAuthenticated,
     signIn, 
     register,
     isLoading: authLoading 

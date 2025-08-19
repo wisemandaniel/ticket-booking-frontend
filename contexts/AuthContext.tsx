@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 
-const baseUrl = 'http://192.168.1.177:3000';
+const baseUrl = 'http://192.168.1.45:3000';
 
 interface User {
   id: string;

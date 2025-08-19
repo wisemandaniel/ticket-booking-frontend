@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-const BASE_URL = 'http://192.168.1.177:3000/api/v1';
+const BASE_URL = 'http://192.168.1.45:3000/api/v1';
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -108,6 +108,17 @@ export const bookingsService = {
   getDashboardStats: (userId: string) => api.get(`/bookings/stats/${userId}`),
   getTravelHistory: (userId: string) => api.get(`/bookings/history/${userId}`),
   getUpcomingTrips: (userId: string) => api.get(`/bookings/upcoming/${userId}`),
+  createBooking: async (data: any) => {
+    try {
+      console.log('Sending booking data:', JSON.stringify(data, null, 2));
+      const response = await api.post('/bookings', data);
+      console.log('Booking created successfully:', response.data);
+      return response;
+    } catch (error: any) {
+      console.error('Booking creation API error:', error.response?.data || error.message);
+      throw error;
+    }
+  },
 };
 
 export const saveAuthToken = async (token: any) => {
