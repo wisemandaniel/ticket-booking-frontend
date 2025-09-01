@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 
-const baseUrl = 'http://192.168.1.45:3000';
+const baseUrl = 'https://ticket-booking-backend-dquw.onrender.com';
 
 interface User {
   id: string;
@@ -44,13 +44,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
 
   const saveAuthData = useCallback(async (token: string, userData: User) => {
+    // console.log('saving auth data:', {token, userData});
+    // console.log('stringified auth data:', {token, userData: JSON.stringify(userData)});
+    
     try {
       await Promise.all([
-        SecureStore.setItemAsync('auth_token', token),
-        SecureStore.setItemAsync('user_data', JSON.stringify(userData))
+        await SecureStore.setItemAsync('auth_token', token),
+        await SecureStore.setItemAsync('user_data', JSON.stringify(userData))
       ]);
     } catch (err) {
-      console.error('Failed to save auth data:', err);
+      // console.log('Failed to save auth data:', err);
       throw new Error('Failed to save authentication data');
     }
   }, []);
@@ -152,8 +155,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (!response.ok) {
         throw new Error(data.message || 'Signup failed');
       }
+      
+       
+      console.log('Signnup response:', data.data.user);
 
-      await saveAuthData(data.token, data.user);
+      await saveAuthData(data.token, data.data.user);
       setUser(data.user);
       setIsAuthenticated(true);
     } catch (error) {
