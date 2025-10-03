@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, ActivityIndicator, FlatList, StyleSheet, Animated, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, ActivityIndicator, FlatList, StyleSheet, Animated, TouchableOpacity, RefreshControl, SafeAreaView } from 'react-native';
 import { useLanguage } from '../contexts/LanguageContext';
 import { bookingsService } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -7,11 +7,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 
 interface HistoryItem {
   _id: string;
+  agency: string;
   route: string;
   date: string | Date;
   seats: number;
   totalAmount: number;
-  status?: 'completed' | 'upcoming';
+  status?: 'confirmed' | 'cancelled' | 'completed' | 'upcoming';
 }
 
 type SnackbarType = 'error' | 'success' | 'info';
@@ -32,7 +33,27 @@ export default function TravelHistoryScreen() {
   const fetchTravelHistory = useCallback(async () => {
     try {
       const response = await bookingsService.getTravelHistory(user?._id);
-      setHistory(response.data.history);
+      console.log('Travel history response:', response.data);
+      
+      // Process the data to add status based on date
+      const processedHistory = response.data.history.map((item: any) => {
+        const travelDate = new Date(item.date);
+        const today = new Date();
+        
+        let status: 'completed' | 'upcoming' | 'confirmed' = 'confirmed';
+        if (travelDate < today) {
+          status = 'completed';
+        } else if (travelDate > today) {
+          status = 'upcoming';
+        }
+        
+        return {
+          ...item,
+          status
+        };
+      });
+      
+      setHistory(processedHistory);
       if (!refreshing) {
         showSnackbar(t('historyLoadedSuccess'), 'success');
       }
@@ -43,7 +64,7 @@ export default function TravelHistoryScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?._id, refreshing]);
+  }, [user?._id, refreshing, t]);
 
   useEffect(() => {
     if (user?._id) {
@@ -88,11 +109,19 @@ export default function TravelHistoryScreen() {
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <MaterialIcons name="directions-bus" size={24} color="#4a6fa5" />
-        <Text style={styles.route}>{item.route}</Text>
+        <View style={styles.routeContainer}>
+          <Text style={styles.route} numberOfLines={1} ellipsizeMode="tail">
+            {item.route}
+          </Text>
+          <Text style={styles.agency} numberOfLines={1} ellipsizeMode="tail">
+            {item.agency}
+          </Text>
+        </View>
         {item.status && (
           <View style={[
             styles.statusBadge,
-            item.status === 'completed' ? styles.completedBadge : styles.upcomingBadge
+            item.status === 'completed' ? styles.completedBadge : 
+            item.status === 'upcoming' ? styles.upcomingBadge : styles.confirmedBadge
           ]}>
             <Text style={styles.statusText}>{t(item.status)}</Text>
           </View>
@@ -102,21 +131,21 @@ export default function TravelHistoryScreen() {
       <View style={styles.detailsContainer}>
         <View style={styles.detailRow}>
           <MaterialIcons name="calendar-today" size={16} color="#6c757d" />
-          <Text style={styles.detailText}>
+          <Text style={styles.detailText} numberOfLines={1}>
             {new Date(item.date).toLocaleDateString()}
           </Text>
         </View>
         
         <View style={styles.detailRow}>
           <MaterialIcons name="event-seat" size={16} color="#6c757d" />
-          <Text style={styles.detailText}>
+          <Text style={styles.detailText} numberOfLines={1}>
             {t('seats')}: {item.seats}
           </Text>
         </View>
       </View>
       
       <View style={styles.amountContainer}>
-        <Text style={styles.amountText}>
+        <Text style={styles.amountText} numberOfLines={1}>
           {t('currency')} {item.totalAmount.toLocaleString()}
         </Text>
       </View>
@@ -141,71 +170,76 @@ export default function TravelHistoryScreen() {
 
   if (loading && !refreshing) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4a6fa5" />
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4a6fa5" />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={history}
-        keyExtractor={(item) => item._id}
-        ListHeaderComponent={
-          <Text style={styles.header}>{t('travelHistory')}</Text>
-        }
-        contentContainerStyle={[styles.listContent, history.length === 0 && { flex: 1 }]}
-        renderItem={renderHistoryItem}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <MaterialIcons name="history" size={48} color="#adb5bd" />
-            <Text style={styles.emptyText}>{t('noTravelHistory')}</Text>
-          </View>
-        }
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#4a6fa5']}
-            tintColor="#4a6fa5"
-          />
-        }
-      />
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <FlatList
+          data={history}
+          keyExtractor={(item) => item._id}
+          ListHeaderComponent={
+            <Text style={styles.header}>{t('travelHistory')}</Text>
+          }
+          contentContainerStyle={[styles.listContent, history.length === 0 && styles.emptyListContent]}
+          renderItem={renderHistoryItem}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <MaterialIcons name="history" size={48} color="#adb5bd" />
+              <Text style={styles.emptyText}>{t('noTravelHistory')}</Text>
+            </View>
+          }
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#4a6fa5']}
+              tintColor="#4a6fa5"
+            />
+          }
+        />
 
-      {snackbar.visible && (
-        <Animated.View 
-          style={[
-            styles.snackbar, 
-            getSnackbarStyle(), 
-            { transform: [{ translateY }] }
-          ]}
-        >
-          <View style={styles.snackbarContent}>
-            {getSnackbarIcon()}
-            <Text style={styles.snackbarText}>{snackbar.message}</Text>
-            <TouchableOpacity onPress={hideSnackbar}>
-              <MaterialIcons name="close" size={24} color="white" />
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      )}
-    </View>
+        {snackbar.visible && (
+          <Animated.View 
+            style={[
+              styles.snackbar, 
+              getSnackbarStyle(), 
+              { transform: [{ translateY }] }
+            ]}
+          >
+            <View style={styles.snackbarContent}>
+              {getSnackbarIcon()}
+              <Text style={styles.snackbarText} numberOfLines={2}>{snackbar.message}</Text>
+              <TouchableOpacity onPress={hideSnackbar}>
+                <MaterialIcons name="close" size={24} color="white" />
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
 
-
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#f8f9fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
   },
   header: {
     fontSize: 24,
@@ -213,9 +247,14 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
     marginBottom: 24,
     marginTop: 8,
+    paddingHorizontal: 4,
   },
   listContent: {
     paddingBottom: 24,
+  },
+  emptyListContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   card: {
     backgroundColor: '#ffffff',
@@ -233,18 +272,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  routeContainer: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
   route: {
     fontSize: 18,
     fontWeight: '600',
     color: '#2c3e50',
-    marginLeft: 12,
-    flex: 1,
+  },
+  agency: {
+    fontSize: 14,
+    color: '#6c757d',
+    marginTop: 2,
   },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    marginLeft: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  confirmedBadge: {
+    backgroundColor: '#d1ecf1',
   },
   completedBadge: {
     backgroundColor: '#d4edda',
@@ -255,9 +306,11 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     fontWeight: '600',
+    color: '#0c5460',
   },
   detailsContainer: {
     marginLeft: 36,
+    marginRight: 8,
   },
   detailRow: {
     flexDirection: 'row',
@@ -268,6 +321,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6c757d',
     marginLeft: 8,
+    flex: 1,
   },
   amountContainer: {
     marginTop: 12,
@@ -282,7 +336,6 @@ const styles = StyleSheet.create({
     color: '#28a745',
   },
   emptyContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,

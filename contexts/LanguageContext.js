@@ -117,7 +117,7 @@ const translations = {
     // Travel History Screen
     travelHistory: "Travel History",
     noTravelHistory: "No travel history found",
-    seats: "Seats",
+    seats: "Number of Seats",
     currency: "FCFA",
     completed: "Completed",
     upcoming: "Upcoming",

@@ -15,7 +15,6 @@ interface DashboardStats {
 }
 
 const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - 60) / 3; // 20px padding * 2 + 20px gap
 
 export default function DashboardScreen() {
   const { t } = useLanguage();
@@ -139,6 +138,7 @@ export default function DashboardScreen() {
     return (
       <View style={[styles.container, styles.center]}>
         <ActivityIndicator size="large" color="#4a6fa5" />
+        <Text style={styles.loadingText}>{t('loading')}</Text>
       </View>
     );
   }
@@ -178,19 +178,28 @@ export default function DashboardScreen() {
         <Text style={styles.title}>{t('dashboardTitle')}</Text>
         
         <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
+          <View style={[styles.statCard, styles.totalCard]}>
+            <View style={styles.cardIconContainer}>
+              <MaterialIcons name="bookmark" size={28} color="#4a6fa5" />
+            </View>
             <Text style={styles.statNumber}>{stats.totalBookings}</Text>
-            <Text style={styles.statLabel}>{t('totalBookings')}</Text>
+            <Text style={styles.statLabel} numberOfLines={2}>{t('totalBookings')}</Text>
           </View>
           
-          <View style={styles.statCard}>
+          <View style={[styles.statCard, styles.upcomingCard]}>
+            <View style={styles.cardIconContainer}>
+              <MaterialIcons name="event" size={28} color="#28a745" />
+            </View>
             <Text style={styles.statNumber}>{stats.upcomingBookings}</Text>
-            <Text style={styles.statLabel}>{t('upcomingTrips')}</Text>
+            <Text style={styles.statLabel} numberOfLines={2}>{t('upcomingTrips')}</Text>
           </View>
           
-          <View style={styles.statCard}>
+          <View style={[styles.statCard, styles.pastCard]}>
+            <View style={styles.cardIconContainer}>
+              <MaterialIcons name="history" size={28} color="#6f42c1" />
+            </View>
             <Text style={styles.statNumber}>{stats.pastBookings}</Text>
-            <Text style={styles.statLabel}>{t('pastTrips')}</Text>
+            <Text style={styles.statLabel} numberOfLines={2}>{t('pastTrips')}</Text>
           </View>
         </View>
         
@@ -198,6 +207,7 @@ export default function DashboardScreen() {
           style={styles.button}
           onPress={() => router.navigate('/travel-history')}
         >
+          <MaterialIcons name="history" size={20} color="white" style={styles.buttonIcon} />
           <Text style={styles.buttonText}>{t('viewTravelHistory')}</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -226,16 +236,19 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f9fa',
   },
   scrollContainer: {
     flexGrow: 1,
     padding: 20,
     paddingBottom: 40,
+
+    marginBottom: 50,
   },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f9fa',
+    padding: 20,
   },
   center: {
     justifyContent: 'center',
@@ -249,20 +262,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     marginBottom: 30,
-    gap: 15,
+    gap: 20,
   },
   statCard: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 25,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 140,
-    minWidth: CARD_WIDTH,
+    minHeight: 120,
+    width: '100%',
     shadowColor: '#000',
     shadowOffset: { 
       width: 0, 
@@ -272,25 +282,50 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
+  totalCard: {
+    borderLeftWidth: 5,
+    borderLeftColor: '#4a6fa5',
+  },
+  upcomingCard: {
+    borderLeftWidth: 5,
+    borderLeftColor: '#28a745',
+  },
+  pastCard: {
+    borderLeftWidth: 5,
+    borderLeftColor: '#6f42c1',
+  },
+  cardIconContainer: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 20,
+  },
   statNumber: {
     fontSize: 36,
     fontWeight: '800',
-    marginBottom: 10,
-    color: '#4a6fa5',
+    color: '#2c3e50',
+    marginRight: 'auto',
   },
   statLabel: {
     fontSize: 16,
     color: '#6c757d',
-    textAlign: 'center',
     fontWeight: '600',
-    lineHeight: 20,
+    textAlign: 'right',
+    flexShrink: 1,
+    maxWidth: '40%',
   },
   button: {
     backgroundColor: '#4a6fa5',
-    padding: 20,
+    padding: 18,
     borderRadius: 12,
     alignItems: 'center',
-    marginTop: 20,
+    justifyContent: 'center',
+    flexDirection: 'row',
+    marginTop: 5,
+    marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { 
       width: 0, 
@@ -305,12 +340,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 18,
   },
+  buttonIcon: {
+    marginRight: 10,
+  },
   errorText: {
     color: '#e74c3c',
     fontSize: 18,
     marginBottom: 20,
     textAlign: 'center',
     marginHorizontal: 20,
+    marginTop: 16,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6c757d',
   },
   retryButton: {
     backgroundColor: '#4a6fa5',
@@ -327,7 +371,7 @@ const styles = StyleSheet.create({
   },
   snackbar: {
     position: 'absolute',
-    bottom: 20,
+    top: 20,
     left: 20,
     right: 20,
     borderRadius: 12,
